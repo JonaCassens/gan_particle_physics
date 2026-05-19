@@ -2,6 +2,17 @@
 
 Workflow for generating synthetic COMET experiment particle physics data using a Wasserstein GAN with Gradient Penalty (WGAN-GP). This pipeline loads ROOT files containing particle trajectories, trains a GAN, and generates statistically similar synthetic samples.
 
+> **🏆 Current Best Result — `e_theta_constraint` (WGAN-GP, muons, 10M training samples)**
+> 
+> | Metric | Synthetic vs Real | Real vs Real Baseline |
+> |--------|:-----------------:|:---------------------:|
+> | C2ST Accuracy | 0.513 | 0.500 |
+> | C2ST ROC-AUC | 0.521 | 0.500 |
+> | MMD | 0.00634 | ~0.0 |
+> | 1-NN LOO Accuracy | 51.0% | ~50% |
+> 
+> All metrics are close to the real-vs-real baseline, meaning the generator produces synthetic muon data that is **nearly statistically indistinguishable from real data**. C2ST accuracy near 0.5 and ROC-AUC near 0.5 are ideal — a classifier cannot reliably separate real from synthetic.
+
 ## Project Structure
 
 ```
