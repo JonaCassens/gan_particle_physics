@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.env
+venv/
+*.egg-info/
+
+# Data files (too large for git)
+*.parquet
+*.root
+*.rootracker
+*.h5
+*.hdf5
+
+# Results & outputs (auto-generated)
+gan_results/
+
+# Condor logs
+condor/logs/
+
+# Models
+*.pth
+
+# Jupyter
+.ipynb_checkpoints/
+notebooks/.ipynb_checkpoints/
+
+# OS
+.DS_Store
+*.swp
