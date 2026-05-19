@@ -1,0 +1,19 @@
+# HTCondor Submit File for Batched Preprocessing
+
+executable = /home/hep/jcc525/gan_particle_physics/condor/eval_script.sh
+arguments = --run-dir e_theta_constraint
+
+initialdir = /home/hep/jcc525/gan_particle_physics/condor
+
+output = logs/eval_batch_$(ClusterId).$(Process).out
+error = logs/eval_batch_$(ClusterId).$(Process).err
+log = logs/eval_batch_$(ClusterId).$(Process).log
+
++MaxRuntime = 3600
+
+request_cpus = 1
+request_gpus = 1
+request_memory = 8GB
+request_disk = 8GB
+
+queue 1

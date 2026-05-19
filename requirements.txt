@@ -1,0 +1,11 @@
+uproot
+awkward
+vector
+scipy
+pandas
+numpy
+matplotlib
+seaborn
+pyarrow
+torch
+scikit-learn

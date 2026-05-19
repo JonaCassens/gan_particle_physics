@@ -1,0 +1,16 @@
+executable = /home/hep/jcc525/gan_particle_physics/condor/job_script.sh
+arguments = --pdg 13 --monitor-id 4 --entries 5000 --test-entries 10000 --epochs 1 --device cuda --model wgan-gp --patience 5 --log-interval 1 --n-critic 1 --batch-size 64 --latent-dim 32
+initialdir = /home/hep/jcc525/gan_particle_physics/condor
+
+output = logs/gan_$(ClusterId).$(ProcId).out
+error = logs/gan_$(ClusterId).$(ProcId).err
+log = logs/gan_$(ClusterId).$(ProcId).log
+
+request_gpus = 1
+request_cpus = 2
+request_memory = 8GB
+request_disk = 10GB
+
++MaxRuntime = 7200
+
+queue 1

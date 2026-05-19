@@ -1,0 +1,17 @@
+# HTCondor Submit File for Test Preprocessing
+
+executable = /home/hep/jcc525/gan_particle_physics/condor/preprocess_job_script.sh
+arguments = --max-files 2 --monitor-id 4
+
+initialdir = /home/hep/jcc525/gan_particle_physics/condor
+
+output = logs/test_preprocess_batch_$(ClusterId).$(Process).out
+error = logs/test_preprocess_batch_$(ClusterId).$(Process).err
+log = logs/test_preprocess_batch_$(ClusterId).$(Process).log
+
++MaxRuntime = 7200
+
+request_memory = 2GB
+request_disk = 5GB
+
+queue 1

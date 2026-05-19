@@ -14,7 +14,10 @@ venv/
 *.hdf5
 
 # Results & outputs (auto-generated)
-gan_results/
+gan_results/*
+!gan_results/e_theta_constraint/
+gan_results/e_theta_constraint/*.pth
+gan_results/e_theta_constraint/*.parquet
 
 # Condor logs
 condor/logs/
