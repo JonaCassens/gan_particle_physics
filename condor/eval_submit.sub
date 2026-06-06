@@ -1,7 +1,7 @@
 # HTCondor Submit File for Batched Preprocessing
 
 executable = /home/hep/jcc525/gan_particle_physics/condor/eval_script.sh
-arguments = --run-dir e_theta_constraint
+arguments = --run-dir cwgan_full_filtered_2
 
 initialdir = /home/hep/jcc525/gan_particle_physics/condor
 

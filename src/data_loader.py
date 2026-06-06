@@ -157,8 +157,8 @@ def _transform_preprocessed_batch(
         df_batch = df_batch.drop(columns=["r"])
 
     # Comment out usually, leave in for debugging
-    if "x" in df_batch.columns:
-        df_batch = df_batch.drop(columns=["x"])  # Remove x feature
+    # if "x" in df_batch.columns:
+    #     df_batch = df_batch.drop(columns=["x"])  # Remove x feature
 
     return df_batch
 

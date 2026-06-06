@@ -426,7 +426,7 @@ class WGAN_GP:
 def _clone_state_dict_to_cpu(module: nn.Module):
     return {k: v.detach().cpu().clone() for k, v in module.state_dict().items()}
 
-def train_wgan_gp(dataframe, epochs=100, batch_size=512, latent_dim=128, device='cuda',
+def train_wgan_gp(dataframe, selected_pdg: int, epochs=100, batch_size=512, latent_dim=128, device='cuda',
                   n_critic=5, lambda_gp=10.0, num_workers=1, log_interval=10,
                   patience=25, min_delta=0.0001, val_split=0.2,
                   mmd_sigma="median", mmd_sigma_scale=1.0,
@@ -438,6 +438,9 @@ def train_wgan_gp(dataframe, epochs=100, batch_size=512, latent_dim=128, device=
                   mmd_eval_interval=1,
                   mmd_eval_samples=20000):
     """Train WGAN-GP on particle physics data with early stopping based on validation MMD."""
+    if selected_pdg is None:
+        raise ValueError("train_wgan_gp requires selected_pdg (from --pdg in main.py).")
+
     # Split into train and validation
     n_train = int(len(dataframe) * (1 - val_split))
     train_df = dataframe.iloc[:n_train].copy()
@@ -465,6 +468,7 @@ def train_wgan_gp(dataframe, epochs=100, batch_size=512, latent_dim=128, device=
                 )
             )
 
+    mass_source = None
     if float(energy_constraint_weight) > 0.0:
         momentum_feature_name = None
         for candidate in ENERGY_FEATURE_CANDIDATES:
@@ -483,16 +487,23 @@ def train_wgan_gp(dataframe, epochs=100, batch_size=512, latent_dim=128, device=
                 raise ValueError(message)
         else:
             if energy_mass_mode == "pdg_lookup":
-                mass_gev, mass_source = _resolve_mass_from_dataframe(train_df)
+                pdg_abs = int(np.abs(int(selected_pdg)))
+                resolved_mass = PDG_MASS_GEV.get(pdg_abs)
+                if resolved_mass is None:
+                    mass_gev = float(DEFAULT_PARTICLE_MASS_GEV)
+                    mass_source = f"cli_pdg_default:{pdg_abs}"
+                else:
+                    mass_gev = float(resolved_mass)
+                    mass_source = f"cli_pdg:{pdg_abs}"
             else:
                 raise ValueError(
                     f"Unsupported energy_mass_mode={energy_mass_mode}; expected 'pdg_lookup'"
                 )
 
-            if mass_source == "default:muon":
+            if mass_source.startswith("cli_pdg_default:"):
                 print(
                     "⚠️ Energy constraint mass fallback to muon mass "
-                    f"({DEFAULT_PARTICLE_MASS_GEV:.6f} GeV); no usable PDG column found"
+                    f"({DEFAULT_PARTICLE_MASS_GEV:.6f} GeV); unsupported CLI PDG={selected_pdg}"
                 )
 
             momentum_values = train_df[momentum_feature_name].values.astype(np.float32)
@@ -725,7 +736,9 @@ def train_wgan_gp(dataframe, epochs=100, batch_size=512, latent_dim=128, device=
         "trig_constraint_weight": float(trig_constraint_weight),
         "energy_constraint_weight": float(energy_constraint_weight),
         "energy_mass_mode": str(energy_mass_mode),
-        "energy_missing_policy": str(energy_missing_policy)
+        "energy_missing_policy": str(energy_missing_policy),
+        "selected_pdg": int(selected_pdg),
+        "mass_source": str(mass_source),
     }
     history["lr_scheduler_config"] = {
         "type": "StepLR",

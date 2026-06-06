@@ -255,6 +255,7 @@ def main():
     elif args.model == "wgan-gp":
         gan, mean, std, history = train_wgan_gp(
             train_df,
+            selected_pdg=args.pdg,
             epochs=args.epochs,
             batch_size=args.batch_size,
             latent_dim=args.latent_dim,
