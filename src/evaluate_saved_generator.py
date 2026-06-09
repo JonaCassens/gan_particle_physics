@@ -840,7 +840,7 @@ def main() -> None:
         split_mode = log_split_mode or "shuffled"
 
     output_json = os.path.abspath(_default_output_json(run_dir, generator_path))
-    data_file = f"/home/hep/jcc525/cleaned_data/pdg{pdg}_monitor{monitor_id}.parquet"
+    data_file = f"/home/hep/jcc525/cleaned_data/pdgNone_monitor{monitor_id}.parquet"
 
     _print_key_value_block(
         "STEP 0: External Evaluation Configuration",

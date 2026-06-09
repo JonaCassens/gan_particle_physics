@@ -15,9 +15,17 @@ PDG_FEATURE_CANDIDATES = ("pdg", "pdg_id", "pdgid", "pid")
 PDG_MASS_GEV = {
     11: 0.00051099895,
     13: 0.1056583755,
+    15: 1.77686,
+    22: 0.0,
+    111: 0.1349768,
     211: 0.13957039,
+    310: 0.497611,
     321: 0.493677,
+    130: 0.497611,
+    311: 0.497611,
     2212: 0.9382720813,
+    2112: 0.9395654133,
+    3122: 1.115683,
 }
 DEFAULT_PARTICLE_MASS_GEV = PDG_MASS_GEV[13]
 TRIG_CLIP_FEATURES = ("sin_phi_s", "cos_phi_s", "sin_theta", "cos_theta", "phi_p")
