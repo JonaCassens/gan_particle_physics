@@ -27,12 +27,7 @@ import sys
 # Add src directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent))
 
-from evaluate_saved_generator import (
-    _infer_generator_architecture,
-    _create_generator,
-    _compute_normalization_stats,
-    _generate_synthetic_samples,
-)
+from utils import generate_synthetic_from_checkpoint
 DEFAULT_TRAIN_PARQUET = "/home/hep/jcc525/cleaned_data/pdg13_monitor4.parquet"
 
 
@@ -60,79 +55,28 @@ def resolve_device(device_flag: str) -> str:
     return "cuda" if torch.cuda.is_available() else "cpu"
 
 
-def load_wgangp_generator(generator_path: str, train_parquet: str, device: str):
-    print(f"Loading generator checkpoint: {generator_path}")
-    checkpoint = torch.load(generator_path, map_location="cpu")
-    state_dict = checkpoint.get("state_dict", checkpoint) if isinstance(checkpoint, dict) else checkpoint
-
-    arch = _infer_generator_architecture(state_dict)
-    latent_dim = int(arch["latent_dim"])
-    output_dim = int(arch["output_dim"])
-    hidden_dims = list(arch.get("hidden_dims", [256, 256]))
-
-    if not all(k.startswith("model.") for k in state_dict.keys()):
-        raise RuntimeError("Expected WGAN-GP checkpoint with keys prefixed by 'model.'")
-
-    model_state = {k: v for k, v in state_dict.items() if k.startswith("model.")}
-    generator = _create_generator(
-        model_type="wgan-gp",
-        latent_dim=latent_dim,
-        output_dim=output_dim,
-        hidden_dims=hidden_dims,
-        normalization="layernorm",
-        state_dict=model_state,
-    )
-    generator.load_state_dict(model_state, strict=True)
-    generator = generator.to(device)
-    generator.eval()
-
-    print(f"Loading normalization parquet: {train_parquet}")
-    train_df = pd.read_parquet(train_parquet)
-    all_columns = list(train_df.columns)
-    mean, std = _compute_normalization_stats(train_df, model_type="wgan-gp")
-
-    if "pdg" in all_columns:
-        pdg_idx = all_columns.index("pdg")
-        feature_names = [column for column in all_columns if column != "pdg"]
-        if len(mean) == len(all_columns):
-            keep_idx = [idx for idx in range(len(all_columns)) if idx != pdg_idx]
-            mean = mean[keep_idx]
-            std = std[keep_idx]
-    else:
-        feature_names = all_columns
-
-    if len(mean) != len(feature_names) or len(std) != len(feature_names):
-        raise RuntimeError(
-            "Normalization shape mismatch after schema alignment: "
-            f"len(mean)={len(mean)}, len(std)={len(std)}, len(feature_names)={len(feature_names)}"
-        )
-
-    return generator, latent_dim, mean, std, feature_names
-
-
 def generate_particles(
-    generator,
+    generator_path: str,
+    train_parquet: str,
     n_particles: int,
-    latent_dim: int,
-    mean: np.ndarray,
-    std: np.ndarray,
-    feature_names: list[str],
     batch_size: int,
     device: str,
 ) -> pd.DataFrame:
     print(f"Generating {n_particles} particles")
-    samples, generated_feature_names = _generate_synthetic_samples(
-        generator=generator,
+    print(f"Loading normalization parquet: {train_parquet}")
+    train_df = pd.read_parquet(train_parquet)
+    generation_result = generate_synthetic_from_checkpoint(
+        generator_path=generator_path,
+        train_df=train_df,
         n_samples=n_particles,
-        latent_dim=latent_dim,
-        mean=mean,
-        std=std,
         device=device,
         batch_size=batch_size,
-        feature_names=feature_names,
+        model_type="wgan-gp",
         apply_angle_clipping=True,
         conditional_pdg_codes=None,
     )
+    samples = generation_result["samples"]
+    generated_feature_names = generation_result["feature_names"]
     df = pd.DataFrame(samples, columns=generated_feature_names)
     print(f"Generated columns: {list(df.columns)}")
     return df
@@ -244,18 +188,10 @@ def main() -> int:
     print(f"Using device: {device}")
 
     try:
-        generator, latent_dim, mean, std, feature_names = load_wgangp_generator(
+        generated_df = generate_particles(
             generator_path=args.generator,
             train_parquet=args.train_parquet,
-            device=device,
-        )
-        generated_df = generate_particles(
-            generator=generator,
             n_particles=int(args.n_particles),
-            latent_dim=latent_dim,
-            mean=mean,
-            std=std,
-            feature_names=feature_names,
             batch_size=int(args.batch_size),
             device=device,
         )

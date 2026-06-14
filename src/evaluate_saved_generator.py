@@ -21,6 +21,7 @@ from utils import (
     save_metrics_json,
     compute_fpd,
     compute_1nn_loo,
+    generate_synthetic_from_checkpoint,
 )
 from wgan_model import Generator as WGANGenerator, ParticleDataset as WGANParticleDataset
 from wgan_gp_model import (
@@ -886,25 +887,6 @@ def main() -> None:
     print(f"Feature columns ({len(train_df.columns)}): {list(train_df.columns)}")
 
     _print_section("STEP 2: Preparing Generator and Normalization")
-    mean, std = _compute_normalization_stats(train_df, model_type=model_type)
-    print(f"Normalization mode: {'robust median/IQR' if model_type == 'wgan-gp' else 'mean/std'}")
-    print(f"Mean vector shape: {mean.shape}")
-    print(f"Std vector shape: {std.shape}")
-    print(f"Std min/max: {_fmt_float(np.min(std))} / {_fmt_float(np.max(std))}")
-
-    generator = _create_generator(
-        model_type=model_type,
-        latent_dim=latent_dim,
-        output_dim=int(inferred["output_dim"]),
-        hidden_dims=list(inferred["hidden_dims"]),
-        normalization=str(inferred["normalization"]),
-        state_dict=state_dict,
-    ).to(DEFAULT_DEVICE)
-    generator.load_state_dict(state_dict, strict=True)
-    generator.eval()
-    print("Generator instantiated and checkpoint loaded successfully.")
-    print(f"Inferred architecture: {inferred}")
-
     apply_angle_clipping = model_type in {"wgan-gp", "cwgan-gp"}
     print(f"Apply generation bounds clipping: {apply_angle_clipping}")
 
@@ -912,19 +894,30 @@ def main() -> None:
     print(f"Requested synthetic rows: {len(test_df):,}")
     print(f"Generation batch size: {DEFAULT_BATCH_SIZE:,}")
     generation_start_time = time.perf_counter()
-    synthetic_data, generation_feature_names = _generate_synthetic_samples(
-        generator=generator,
+    generation_result = generate_synthetic_from_checkpoint(
+        generator_path=generator_path,
+        train_df=train_df,
         n_samples=len(test_df),
-        latent_dim=latent_dim,
-        mean=mean,
-        std=std,
         device=DEFAULT_DEVICE,
         batch_size=DEFAULT_BATCH_SIZE,
-        feature_names=list(train_df.columns),
+        model_type=model_type,
+        latent_dim=latent_dim,
         apply_angle_clipping=apply_angle_clipping,
         conditional_pdg_codes=(test_df["pdg"].to_numpy(dtype=np.int64) if (model_type == "cwgan-gp" and "pdg" in test_df.columns) else None),
     )
+    synthetic_data = generation_result["samples"]
+    generation_feature_names = generation_result["feature_names"]
+    inferred = generation_result.get("inferred_architecture", inferred)
+    mean = generation_result.get("mean")
+    std = generation_result.get("std")
     generation_elapsed_seconds = time.perf_counter() - generation_start_time
+    print(f"Normalization mode: {'robust median/IQR' if model_type == 'wgan-gp' else 'mean/std'}")
+    if mean is not None and std is not None:
+        print(f"Mean vector shape: {mean.shape}")
+        print(f"Std vector shape: {std.shape}")
+        print(f"Std min/max: {_fmt_float(np.min(std))} / {_fmt_float(np.max(std))}")
+    print("Generator loaded and samples generated via shared utility.")
+    print(f"Inferred architecture: {inferred}")
     synthetic_df = pd.DataFrame(synthetic_data, columns=generation_feature_names)
     if model_type == "cwgan-gp" and "pdg" in test_df.columns and "pdg" not in synthetic_df.columns:
         synthetic_df.insert(0, "pdg", test_df["pdg"].to_numpy(dtype=np.int64))

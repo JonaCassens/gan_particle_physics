@@ -152,6 +152,10 @@ def _transform_preprocessed_batch(
         df_batch["log1p_p_mag"] = np.log1p(np.clip(df_batch["p_mag"].to_numpy(dtype=np.float64), 0.0, None))
         df_batch = df_batch.drop(columns=["p_mag"])
 
+    # Clip to center circle
+    if "r" in df_batch.columns:
+        df_batch = cast(pd.DataFrame, df_batch.loc[df_batch["r"] < 350].copy())
+
     if "r" in df_batch.columns:
         df_batch["log1p_r"] = np.log1p(np.clip(df_batch["r"].to_numpy(dtype=np.float64), 0.0, None))
         df_batch = df_batch.drop(columns=["r"])

@@ -3,6 +3,7 @@
 import numpy as np
 import pandas as pd
 import torch
+import os
 from scipy import linalg
 from sklearn.neighbors import NearestNeighbors
 import matplotlib.pyplot as plt
@@ -13,6 +14,8 @@ import json
 import gc
 import torch
 import torch.nn as nn
+from contextlib import nullcontext
+from typing import Optional, Any
 from sklearn.metrics import accuracy_score, balanced_accuracy_score, roc_auc_score, confusion_matrix
 
 
@@ -288,6 +291,278 @@ def compute_mmd_rbf(real_data, synthetic_data, sigma="median", sigma_scale=1.0,
         "unbiased": bool(unbiased),
         "backend": "numpy",
         "device": "cpu",
+    }
+
+
+def _infer_generator_architecture_from_state_dict(state_dict: dict[str, torch.Tensor]) -> dict[str, Any]:
+    linear_weights = []
+    for key, tensor in state_dict.items():
+        if tensor.ndim == 2 and key.startswith("model.") and key.endswith(".weight"):
+            try:
+                layer_index = int(key.split(".")[1])
+            except (ValueError, IndexError):
+                continue
+            linear_weights.append((layer_index, key, (int(tensor.shape[0]), int(tensor.shape[1]))))
+
+    linear_weights.sort(key=lambda item: item[0])
+    if not linear_weights:
+        raise ValueError("Could not infer generator architecture from checkpoint state_dict.")
+
+    hidden_dims = [shape[0] for _, _, shape in linear_weights[:-1]]
+    latent_dim = linear_weights[0][2][1]
+    output_dim = linear_weights[-1][2][0]
+    normalization = "batchnorm" if any("running_mean" in key for key in state_dict) else "layernorm"
+    if "embedding.weight" in state_dict:
+        model_type = "cwgan-gp"
+    elif normalization == "layernorm":
+        model_type = "wgan-gp"
+    else:
+        model_type = "gan-or-wgan"
+
+    return {
+        "latent_dim": int(latent_dim),
+        "output_dim": int(output_dim),
+        "hidden_dims": [int(v) for v in hidden_dims],
+        "normalization": normalization,
+        "model_type": model_type,
+    }
+
+
+def _build_generator_from_checkpoint(
+    model_type: str,
+    inferred: dict[str, Any],
+    state_dict: dict[str, torch.Tensor],
+) -> nn.Module:
+    from gan_model import Generator as GANGenerator
+    from wgan_model import Generator as WGANGenerator
+    from wgan_gp_model import Generator as WGANGPGenerator
+    from cwgan_gp_model import CGenerator as CWGANGPGenerator
+
+    latent_dim = int(inferred["latent_dim"])
+    output_dim = int(inferred["output_dim"])
+    hidden_dims = list(inferred["hidden_dims"])
+
+    if model_type == "cwgan-gp":
+        embedding_weight = state_dict.get("embedding.weight")
+        if embedding_weight is None:
+            raise ValueError("cwgan-gp checkpoint missing generator embedding.weight")
+        vocab_size = int(embedding_weight.shape[0])
+        embed_dim = int(embedding_weight.shape[1])
+        generator = CWGANGPGenerator(
+            latent_dim=latent_dim,
+            output_dim=output_dim,
+            hidden_dims=hidden_dims,
+            vocab_size=vocab_size,
+            embed_dim=embed_dim,
+        )
+    elif model_type == "wgan-gp":
+        generator = WGANGPGenerator(
+            latent_dim=latent_dim,
+            output_dim=output_dim,
+            hidden_dims=hidden_dims,
+        )
+    elif model_type == "wgan":
+        generator = WGANGenerator(
+            latent_dim=latent_dim,
+            output_dim=output_dim,
+            hidden_dims=hidden_dims,
+        )
+    else:
+        generator = GANGenerator(
+            latent_dim=latent_dim,
+            output_dim=output_dim,
+            hidden_dims=hidden_dims,
+        )
+
+    generator.load_state_dict(state_dict, strict=True)
+    return generator
+
+
+def _compute_normalization_stats_for_model(train_df: pd.DataFrame, model_type: str) -> tuple[np.ndarray, np.ndarray]:
+    from gan_model import ParticleDataset as GANParticleDataset
+    from wgan_model import ParticleDataset as WGANParticleDataset
+    from wgan_gp_model import ParticleDataset as WGANGPParticleDataset
+
+    if model_type in {"wgan-gp", "cwgan-gp"}:
+        dataset = WGANGPParticleDataset(train_df)
+    elif model_type == "wgan":
+        dataset = WGANParticleDataset(train_df)
+    else:
+        dataset = GANParticleDataset(train_df)
+
+    mean = dataset.mean.detach().cpu().numpy().astype(np.float32)
+    std = dataset.std.detach().cpu().numpy().astype(np.float32)
+    return mean, std
+
+
+def _resolve_generation_feature_names(
+    eval_feature_names: list[str],
+    generated_width: int,
+    generator_output_columns: Optional[list[str]] = None,
+) -> list[str]:
+    if generator_output_columns is not None:
+        if len(generator_output_columns) != generated_width:
+            raise ValueError(
+                f"generator_output_columns has length {len(generator_output_columns)}, "
+                f"but generator produced {generated_width} features."
+            )
+        return list(generator_output_columns)
+
+    if generated_width == len(eval_feature_names):
+        return list(eval_feature_names)
+
+    if generated_width == len(eval_feature_names) + 1 and "x" not in eval_feature_names:
+        return ["x", *eval_feature_names]
+
+    if generated_width == len(eval_feature_names) - 1 and "x" in eval_feature_names:
+        return [column for column in eval_feature_names if column != "x"]
+
+    raise ValueError(
+        f"Generator produced {generated_width} features, but evaluation data has "
+        f"{len(eval_feature_names)} columns: {eval_feature_names}."
+    )
+
+
+def generate_synthetic_from_checkpoint(
+    generator_path: str,
+    train_df: pd.DataFrame,
+    n_samples: int,
+    device: str = "cpu",
+    batch_size: int = 32768,
+    model_type: Optional[str] = None,
+    latent_dim: Optional[int] = None,
+    apply_angle_clipping: Optional[bool] = None,
+    conditional_pdg_codes: Optional[np.ndarray] = None,
+    generator_output_columns: Optional[list[str]] = None,
+) -> dict[str, Any]:
+    if n_samples < 1:
+        raise ValueError("n_samples must be >= 1")
+    if not os.path.exists(generator_path):
+        raise FileNotFoundError(f"Generator checkpoint not found: {generator_path}")
+
+    checkpoint = torch.load(generator_path, map_location="cpu")
+    if isinstance(checkpoint, dict) and "state_dict" in checkpoint and isinstance(checkpoint["state_dict"], dict):
+        state_dict = checkpoint["state_dict"]
+    elif isinstance(checkpoint, dict):
+        state_dict = checkpoint
+    else:
+        raise ValueError("Unsupported checkpoint format; expected dict-like state_dict.")
+
+    inferred = _infer_generator_architecture_from_state_dict(state_dict)
+    resolved_model_type = (model_type or inferred["model_type"]).strip().lower()
+    if resolved_model_type == "gan-or-wgan":
+        resolved_model_type = "gan"
+
+    if latent_dim is not None:
+        inferred["latent_dim"] = int(latent_dim)
+
+    mean, std = _compute_normalization_stats_for_model(train_df, resolved_model_type)
+    feature_names = list(train_df.columns)
+    if "pdg" in feature_names and len(mean) == len(feature_names) - 1:
+        feature_names = [column for column in feature_names if column != "pdg"]
+    elif len(mean) != len(feature_names):
+        raise RuntimeError(
+            "Normalization shape mismatch after schema alignment: "
+            f"len(mean)={len(mean)}, len(std)={len(std)}, len(feature_names)={len(feature_names)}"
+        )
+
+    generator = _build_generator_from_checkpoint(
+        model_type=resolved_model_type,
+        inferred=inferred,
+        state_dict=state_dict,
+    ).to(device)
+    generator.eval()
+
+    use_amp = "cuda" in str(device).lower() and torch.cuda.is_available()
+
+    pdg_to_idx: dict[int, int] = {}
+    unknown_idx = 0
+    cond_codes = None
+    if conditional_pdg_codes is not None:
+        cond_codes = np.asarray(conditional_pdg_codes, dtype=np.int64)
+        unique_codes = sorted(set(int(code) for code in cond_codes.tolist()))
+        embedding = getattr(generator, "embedding", None)
+        if embedding is None or not hasattr(embedding, "weight"):
+            raise ValueError("conditional_pdg_codes provided but generator has no embedding layer")
+        vocab_capacity = int(embedding.weight.shape[0])
+        if vocab_capacity < 2:
+            raise ValueError("cwgan embedding vocab size must be at least 2")
+        max_known = vocab_capacity - 1
+        pdg_to_idx = {code: idx for idx, code in enumerate(unique_codes[:max_known])}
+        unknown_idx = max_known
+
+    if apply_angle_clipping is None:
+        apply_angle_clipping = resolved_model_type in {"wgan-gp", "cwgan-gp"}
+
+    generation_feature_names = None
+    mean_gen = None
+    std_gen = None
+    out = None
+
+    with torch.no_grad():
+        for start in range(0, n_samples, batch_size):
+            current_batch_size = min(batch_size, n_samples - start)
+            latent = torch.randn(current_batch_size, int(inferred["latent_dim"]), device=device)
+
+            autocast_context = getattr(torch.cuda.amp, "autocast")(dtype=torch.float16) if use_amp else nullcontext()
+            with autocast_context:
+                if cond_codes is not None:
+                    pdg_chunk = cond_codes[start:start + current_batch_size]
+                    pdg_idx_np = np.array([pdg_to_idx.get(int(code), unknown_idx) for code in pdg_chunk], dtype=np.int64)
+                    pdg_idx = torch.from_numpy(pdg_idx_np).to(device)
+                    chunk = generator(latent, pdg_idx)
+                else:
+                    chunk = generator(latent)
+
+            chunk = chunk.detach().float().cpu().numpy()
+
+            if generation_feature_names is None:
+                generation_feature_names = _resolve_generation_feature_names(
+                    eval_feature_names=feature_names,
+                    generated_width=int(chunk.shape[1]),
+                    generator_output_columns=generator_output_columns,
+                )
+                if generation_feature_names == feature_names:
+                    mean_gen = mean
+                    std_gen = std
+                else:
+                    feat_index = {name: idx for idx, name in enumerate(feature_names)}
+                    gen_indices = [feat_index[name] for name in generation_feature_names if name in feat_index]
+                    mean_gen = mean[gen_indices]
+                    std_gen = std[gen_indices]
+                out = np.empty((n_samples, len(generation_feature_names)), dtype=np.float32)
+
+            if chunk.shape[1] != len(generation_feature_names):
+                raise ValueError(
+                    f"Generator produced {chunk.shape[1]} features, but generation_feature_names has "
+                    f"{len(generation_feature_names)} entries."
+                )
+
+            chunk = chunk * (std_gen + 1e-8) + mean_gen
+
+            if apply_angle_clipping:
+                from wgan_gp_model import _apply_generation_bounds, BOUNDED_CLIP_FEATURES
+
+                clip_feature_indices = {
+                    name: idx
+                    for idx, name in enumerate(generation_feature_names)
+                    if name in BOUNDED_CLIP_FEATURES
+                }
+                chunk = _apply_generation_bounds(chunk, clip_feature_indices)
+
+            out[start:start + current_batch_size] = chunk.astype(np.float32, copy=False)
+
+    if out is None or generation_feature_names is None:
+        raise RuntimeError("No synthetic samples were generated.")
+
+    return {
+        "samples": out,
+        "feature_names": generation_feature_names,
+        "inferred_architecture": inferred,
+        "model_type": resolved_model_type,
+        "latent_dim": int(inferred["latent_dim"]),
+        "mean": mean,
+        "std": std,
     }
 
 def create_white_to_viridis_cmap():
