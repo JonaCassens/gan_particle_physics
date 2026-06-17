@@ -163,7 +163,7 @@ def _transform_preprocessed_batch(
     # Comment out usually, leave in for debugging
     if "x" in df_batch.columns:
         df_batch = cast(pd.DataFrame, df_batch.loc[np.isclose(df_batch["x"], -0.03999999999859938, atol=1e-9)].copy())
-    #     df_batch = df_batch.drop(columns=["x"])  # Remove x feature
+        df_batch = df_batch.drop(columns=["x"])  # Remove x feature
 
     return df_batch
 

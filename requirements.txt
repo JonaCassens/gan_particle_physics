@@ -6,6 +6,7 @@ pandas
 numpy
 matplotlib
 seaborn
+plotly
 pyarrow
 torch
 scikit-learn

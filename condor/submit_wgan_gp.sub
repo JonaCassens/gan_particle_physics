@@ -1,5 +1,5 @@
 executable = /home/hep/jcc525/gan_particle_physics/condor/job_script.sh
-arguments = --output-name neutron_x_constrained --pdg 2112 --monitor-id 4 --gp 10 --entries 10000000 --test-entries 500000 --epochs 100 --device cuda --model wgan-gp --patience 40 --lr-g 2e-5 --lr-c 2e-5 --log-interval 1 --n-critic 5 --batch-size 1024 --latent-dim 128
+arguments = --output-name neutron_x_constrained_dropped --pdg 2112 --monitor-id 4 --gp 10 --entries 10000000 --test-entries 500000 --epochs 50 --device cuda --model wgan-gp --patience 20 --lr-g 2e-5 --lr-c 2e-5 --log-interval 1 --n-critic 5 --batch-size 1024 --latent-dim 128
 initialdir = /home/hep/jcc525/gan_particle_physics/condor
 
 output = logs/gan_$(ClusterId).$(ProcId).out
