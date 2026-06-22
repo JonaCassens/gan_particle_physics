@@ -1,0 +1,319 @@
+{
+  "univariate": [
+    {
+      "variable": "log_t",
+      "ks_stat": 0.008859999999999979,
+      "ks_p": 1.7873554430762558e-17,
+      "wasserstein": 0.01630757976872886
+    },
+    {
+      "variable": "sin_phi_s",
+      "ks_stat": 0.004510000000000014,
+      "ks_p": 7.63680278042391e-05,
+      "wasserstein": 0.004219524350613369
+    },
+    {
+      "variable": "cos_phi_s",
+      "ks_stat": 0.0047440000000000815,
+      "ks_p": 2.5859570760014434e-05,
+      "wasserstein": 0.0036152320642793686
+    },
+    {
+      "variable": "sin_theta",
+      "ks_stat": 0.006823999999999997,
+      "ks_p": 1.5383962213659366e-10,
+      "wasserstein": 0.0018157749112471936
+    },
+    {
+      "variable": "cos_theta",
+      "ks_stat": 0.0039739999999999776,
+      "ks_p": 0.0007422229722464287,
+      "wasserstein": 0.003486583504448772
+    },
+    {
+      "variable": "phi_p",
+      "ks_stat": 0.010185999999999973,
+      "ks_p": 5.855406158423815e-23,
+      "wasserstein": 0.01258075710093176
+    },
+    {
+      "variable": "log1p_p_mag",
+      "ks_stat": 0.008738000000000024,
+      "ks_p": 5.2295877393628815e-17,
+      "wasserstein": 0.015720996751889586
+    },
+    {
+      "variable": "log1p_r",
+      "ks_stat": 0.015979999999999994,
+      "ks_p": 6.958230919106615e-56,
+      "wasserstein": 0.015245301477670645
+    }
+  ],
+  "correlation_diff": {
+    "mean_abs_diff": 0.00683808047324419,
+    "max_abs_diff": 0.02191723883152008,
+    "median_abs_diff": 0.005078718066215515
+  },
+  "mmd": {
+    "mmd": 0.008148779154523911,
+    "mmd2": 6.640260170920342e-05,
+    "sigma": 3.8250179290771484,
+    "gamma": 0.03417456962313815,
+    "n_real": 200000,
+    "n_synthetic": 200000,
+    "max_samples": 200000,
+    "chunk_size": 512,
+    "unbiased": true,
+    "backend": "torch",
+    "device": "cuda"
+  },
+  "c2st": {
+    "accuracy": 0.514075,
+    "balanced_accuracy": 0.5141651938025126,
+    "roc_auc": 0.5224855846269952,
+    "confusion_matrix": {
+      "true_negatives": 18867,
+      "false_positives": 21216,
+      "false_negatives": 17658,
+      "true_positives": 22259
+    },
+    "sample_counts": {
+      "real": 200000,
+      "synthetic": 200000
+    },
+    "config": {
+      "max_samples_per_class": 200000,
+      "epochs": 20,
+      "hidden_dim": 128,
+      "batch_size": 1024,
+      "train_test_split": 0.8,
+      "importance_repeats": 5,
+      "importance_max_samples": 50000,
+      "device_requested": "cuda",
+      "device_used": "cuda"
+    },
+    "feature_importance": [
+      {
+        "feature": "log_t",
+        "importance_mean": 0.008072717972927723,
+        "importance_std": 0.0019377658176367313,
+        "importance_repeats": 5
+      },
+      {
+        "feature": "log1p_r",
+        "importance_mean": 0.007740513769874058,
+        "importance_std": 0.0013069057258139713,
+        "importance_repeats": 5
+      },
+      {
+        "feature": "log1p_p_mag",
+        "importance_mean": 0.005944283937082684,
+        "importance_std": 0.0015350368509179251,
+        "importance_repeats": 5
+      },
+      {
+        "feature": "phi_p",
+        "importance_mean": 0.005585521650587055,
+        "importance_std": 0.00026721412568667124,
+        "importance_repeats": 5
+      },
+      {
+        "feature": "sin_phi_s",
+        "importance_mean": 0.005223928963724656,
+        "importance_std": 0.0016096343806689855,
+        "importance_repeats": 5
+      },
+      {
+        "feature": "cos_theta",
+        "importance_mean": 0.004027911368720738,
+        "importance_std": 0.0009753814100726914,
+        "importance_repeats": 5
+      },
+      {
+        "feature": "cos_phi_s",
+        "importance_mean": 0.0025819639813259966,
+        "importance_std": 0.0007754275684641392,
+        "importance_repeats": 5
+      },
+      {
+        "feature": "sin_theta",
+        "importance_mean": 0.0004067510594184309,
+        "importance_std": 0.001067779749430341,
+        "importance_repeats": 5
+      }
+    ],
+    "interpretation": "Accuracy near 0.5 indicates synthetic and real data are indistinguishable (good fit). Accuracy near 1.0 indicates classifier easily separates them (poor fit). ROC-AUC near 0.5 is better (synthetic \u2248 real); ROC-AUC near 1.0 is worse."
+  },
+  "real_vs_real_baseline": {
+    "slice_metadata": {
+      "n_total": 10500000,
+      "slice_size": 500000,
+      "slice_a_start": 1000000,
+      "slice_a_end": 1500000,
+      "slice_b_start": 7000000,
+      "slice_b_end": 7500000,
+      "shuffle_seed_a": 101,
+      "shuffle_seed_b": 202,
+      "construction": "two unshuffled slices at different offsets, then shuffled independently"
+    },
+    "mmd": {
+      "mmd": 0.0,
+      "mmd2": -1.2210567292836316e-05,
+      "sigma": 3.7739455699920654,
+      "gamma": 0.03510578913414879,
+      "n_real": 200000,
+      "n_synthetic": 200000,
+      "max_samples": 200000,
+      "chunk_size": 512,
+      "unbiased": true,
+      "backend": "torch",
+      "device": "cuda"
+    },
+    "c2st": {
+      "accuracy": 0.4982625,
+      "balanced_accuracy": 0.49839762747578475,
+      "roc_auc": 0.49936344069671434,
+      "confusion_matrix": {
+        "true_negatives": 17367,
+        "false_positives": 22716,
+        "false_negatives": 17423,
+        "true_positives": 22494
+      },
+      "sample_counts": {
+        "real": 200000,
+        "synthetic": 200000
+      },
+      "config": {
+        "max_samples_per_class": 200000,
+        "epochs": 20,
+        "hidden_dim": 128,
+        "batch_size": 1024,
+        "train_test_split": 0.8,
+        "importance_repeats": 5,
+        "importance_max_samples": 50000,
+        "device_requested": "cuda",
+        "device_used": "cuda"
+      },
+      "feature_importance": [
+        {
+          "feature": "sin_phi_s",
+          "importance_mean": 0.0020156681046828327,
+          "importance_std": 0.0014539645610441086,
+          "importance_repeats": 5
+        },
+        {
+          "feature": "cos_phi_s",
+          "importance_mean": 0.0014848294758861402,
+          "importance_std": 0.001409419001097064,
+          "importance_repeats": 5
+        },
+        {
+          "feature": "sin_theta",
+          "importance_mean": 0.00021976547193384156,
+          "importance_std": 0.0005140976886770792,
+          "importance_repeats": 5
+        },
+        {
+          "feature": "log1p_p_mag",
+          "importance_mean": 9.68544160045548e-05,
+          "importance_std": 0.0012661694441708895,
+          "importance_repeats": 5
+        },
+        {
+          "feature": "log_t",
+          "importance_mean": -1.3396958283995452e-05,
+          "importance_std": 0.0008035113783418372,
+          "importance_repeats": 5
+        },
+        {
+          "feature": "cos_theta",
+          "importance_mean": -0.00011919169199501312,
+          "importance_std": 0.001356694397134748,
+          "importance_repeats": 5
+        },
+        {
+          "feature": "log1p_r",
+          "importance_mean": -0.0005569442287277293,
+          "importance_std": 0.0008119975230157123,
+          "importance_repeats": 5
+        },
+        {
+          "feature": "phi_p",
+          "importance_mean": -0.0015289349146977327,
+          "importance_std": 0.000876919641338565,
+          "importance_repeats": 5
+        }
+      ],
+      "interpretation": "Accuracy near 0.5 indicates synthetic and real data are indistinguishable (good fit). Accuracy near 1.0 indicates classifier easily separates them (poor fit). ROC-AUC near 0.5 is better (synthetic \u2248 real); ROC-AUC near 1.0 is worse."
+    }
+  },
+  "delta_vs_real_baseline": {
+    "synth_vs_real": {
+      "mmd": 0.008148779154523911,
+      "c2st_accuracy": 0.514075,
+      "c2st_balanced_accuracy": 0.5141651938025126,
+      "c2st_roc_auc": 0.5224855846269952
+    },
+    "real_vs_real_baseline": {
+      "mmd": 0.0,
+      "c2st_accuracy": 0.4982625,
+      "c2st_balanced_accuracy": 0.49839762747578475,
+      "c2st_roc_auc": 0.49936344069671434
+    },
+    "deltas": {
+      "mmd_delta": 0.008148779154523911,
+      "mmd_ratio": null,
+      "c2st_accuracy_delta": 0.01581249999999995,
+      "c2st_balanced_accuracy_delta": 0.015767566326727822,
+      "c2st_roc_auc_delta": 0.023122143930280892
+    },
+    "interpretation": "Deltas near 0 indicate synthetic-vs-real separability is close to real-vs-real baseline; larger positive deltas indicate synthetic data is easier to distinguish."
+  },
+  "external_evaluation": {
+    "generator_path": "/home/hep/jcc525/gan_particle_physics/gan_results/electron_no_x/generator.pth",
+    "run_dir": "/home/hep/jcc525/gan_particle_physics/gan_results/electron_no_x",
+    "data_file": "/home/hep/jcc525/cleaned_data/pdgNone_monitor4.parquet",
+    "matched_log": "/home/hep/jcc525/gan_particle_physics/condor/logs/gan_4384046.0.out",
+    "resolved_config": {
+      "model": "wgan-gp",
+      "latent_dim": 128,
+      "entries": 10000000,
+      "test_entries": 500000,
+      "pdg": 11,
+      "monitor_id": 4,
+      "split_mode": "shuffled",
+      "split_seed": 42,
+      "batch_size": 32768,
+      "c2st_exclude_features": "x",
+      "generator_filename": "generator.pth",
+      "gan_results_root": "/home/hep/jcc525/gan_particle_physics/gan_results",
+      "run_dir_name": "electron_no_x"
+    },
+    "inferred_architecture": {
+      "latent_dim": 128,
+      "output_dim": 8,
+      "hidden_dims": [
+        512,
+        1024,
+        1024,
+        512
+      ],
+      "normalization": "layernorm",
+      "model_type": "wgan-gp"
+    }
+  },
+  "one_nn_loo": {
+    "accuracy": 0.5171675086021423,
+    "accuracy_percent": 51.71675086021423,
+    "real_accuracy": 0.5181849598884583,
+    "synthetic_accuracy": 0.5161499977111816,
+    "target_for_good_generation": 0.5,
+    "interpretation": "Closer to 0.5 means real and synthetic are less distinguishable by 1-NN.",
+    "n_per_class": 200000,
+    "metric": "euclidean",
+    "seed": 42,
+    "backend": "torch",
+    "device": "cuda",
+    "chunk_size": 2048
+  }
+}

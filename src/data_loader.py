@@ -154,7 +154,7 @@ def _transform_preprocessed_batch(
 
     # Clip to center circle
     if "r" in df_batch.columns:
-        df_batch = cast(pd.DataFrame, df_batch.loc[df_batch["r"] < 350].copy())
+        df_batch = cast(pd.DataFrame, df_batch.loc[df_batch["r"] < 350.5].copy())
 
     if "r" in df_batch.columns:
         df_batch["log1p_r"] = np.log1p(np.clip(df_batch["r"].to_numpy(dtype=np.float64), 0.0, None))

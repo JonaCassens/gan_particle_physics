@@ -98,6 +98,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--batch-size", type=int, default=512)
     parser.add_argument("--device", type=str, default="auto", choices=["auto", "cpu", "cuda"])
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--gan-results-root",
+        type=str,
+        default=GAN_RESULTS_ROOT,
+        help="Root directory containing GAN result subfolders (overrides hardcoded default)",
+    )
     return parser.parse_args()
 
 
@@ -162,7 +168,7 @@ def main() -> int:
 
     folder_specs = []
     for folder_name, pdg_code in zip(args.folders, args.pdg_codes):
-        generator_path = Path(GAN_RESULTS_ROOT) / folder_name / "generator.pth"
+        generator_path = Path(args.gan_results_root) / folder_name / "generator.pth"
         if not generator_path.exists():
             raise FileNotFoundError(f"generator.pth not found for folder '{folder_name}': {generator_path}")
         folder_specs.append({
@@ -257,6 +263,18 @@ def main() -> int:
 
     mixed_df = pd.concat(frames, ignore_index=True)
     mixed_df = mixed_df.sample(frac=1.0, random_state=args.seed).reset_index(drop=True)
+
+    # Apply physical solenoid radius bound: discard any row with r >= 350.5
+    R_MAX = 350.5
+    if "r" in mixed_df.columns:
+        before = len(mixed_df)
+        mixed_df = mixed_df[mixed_df["r"] < R_MAX].reset_index(drop=True)
+        after = len(mixed_df)
+        if before != after:
+            print(f"[INFO] r-clip: removed {before - after:,} rows with r >= {R_MAX} ({100.0*(before-after)/before:.2f}%)")
+    else:
+        print("[WARN] Column 'r' not found in merged DataFrame; r-clip skipped.")
+
     print(f"\nMerged DataFrame ready: rows={len(mixed_df)}, columns={list(mixed_df.columns)}")
 
     output_path = Path(output_parquet)
