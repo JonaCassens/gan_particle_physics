@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-VENV_PATH="/home/hep/jcc525/venv"
+VENV_PATH="/home/hep/jcc525/gan_particle_physics/.venv"
 WORK_DIR="/home/hep/jcc525/gan_particle_physics"
 SCRATCH_DIR="${_CONDOR_SCRATCH_DIR:-/tmp}"
 

@@ -8,10 +8,10 @@ import numpy as np
 import gc
 
 from data_loader import load_preprocessed_data
-from gan_model import train_gan
-from wgan_model import train_wgan
-from wgan_gp_model import train_wgan_gp
-from cwgan_gp_model import train_cwgan_gp
+from models.gan_model import train_gan
+from models.wgan_model import train_wgan
+from models.wgan_gp_model import train_wgan_gp
+from models.cwgan_gp_model import train_cwgan_gp
 from utils import (
     compute_metrics,
     compute_c2st_metrics,
@@ -215,8 +215,19 @@ def main():
     test_df = df.iloc[test_start:test_end].copy()
 
     n_total = len(df)
-    n_train = args.entries if args.entries is not None else int(0.9 * n_total)
-    n_test = args.test_entries if args.test_entries is not None else max(1, n_total - n_train)
+    requested_n_train = args.entries if args.entries is not None else int(0.9 * n_total)
+    requested_n_test = args.test_entries if args.test_entries is not None else max(1, n_total - requested_n_train)
+
+    if requested_n_train + requested_n_test > n_total:
+        n_test = max(1, int(0.1 * n_total)) if n_total > 0 else 0
+        n_train = max(0, n_total - n_test)
+        print(
+            f"[split-adjusted] Requested train+test={requested_n_train + requested_n_test:,} exceeds "
+            f"available rows={n_total:,}. Using fallback split train={n_train:,}, test={n_test:,} (10% test)."
+        )
+    else:
+        n_train = min(max(0, requested_n_train), n_total)
+        n_test = min(max(0, requested_n_test), n_total - n_train)
 
     train_df, test_df = _shuffled_train_test_split(
         df,

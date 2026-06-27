@@ -4,7 +4,13 @@ __pycache__/
 *.pyo
 .env
 venv/
+.venv/
 *.egg-info/
+
+# Agent files
+CLAUDE.md
+.claudeignore
+.claude
 
 # Data files (too large for git)
 *.parquet
@@ -28,6 +34,9 @@ condor/logs/
 # Jupyter
 .ipynb_checkpoints/
 notebooks/.ipynb_checkpoints/
+
+# Archive (old experiments, not tracked)
+src/archive/
 
 # OS
 .DS_Store

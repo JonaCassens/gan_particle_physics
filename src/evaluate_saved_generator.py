@@ -13,7 +13,7 @@ import torch.nn as nn
 from contextlib import nullcontext
 
 from data_loader import load_preprocessed_data
-from gan_model import Generator as GANGenerator, ParticleDataset as GANParticleDataset
+from models.gan_model import Generator as GANGenerator, ParticleDataset as GANParticleDataset
 from utils import (
     compute_c2st_metrics,
     compute_metrics,
@@ -23,14 +23,14 @@ from utils import (
     compute_1nn_loo,
     generate_synthetic_from_checkpoint,
 )
-from wgan_model import Generator as WGANGenerator, ParticleDataset as WGANParticleDataset
-from wgan_gp_model import (
+from models.wgan_model import Generator as WGANGenerator, ParticleDataset as WGANParticleDataset
+from models.wgan_gp_model import (
     Generator as WGANGPGenerator,
     ParticleDataset as WGANGPParticleDataset,
     _apply_generation_bounds,
     BOUNDED_CLIP_FEATURES,
 )
-from cwgan_gp_model import CGenerator as CWGANGPGenerator
+from models.cwgan_gp_model import CGenerator as CWGANGPGenerator
 
 
 CONFIG_LINE_RE = re.compile(r"^\s*([a-zA-Z0-9_]+)\.*\s+(.*?)\s*$")

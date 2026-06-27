@@ -333,10 +333,10 @@ def _build_generator_from_checkpoint(
     inferred: dict[str, Any],
     state_dict: dict[str, torch.Tensor],
 ) -> nn.Module:
-    from gan_model import Generator as GANGenerator
-    from wgan_model import Generator as WGANGenerator
-    from wgan_gp_model import Generator as WGANGPGenerator
-    from cwgan_gp_model import CGenerator as CWGANGPGenerator
+    from models.gan_model import Generator as GANGenerator
+    from models.wgan_model import Generator as WGANGenerator
+    from models.wgan_gp_model import Generator as WGANGPGenerator
+    from models.cwgan_gp_model import CGenerator as CWGANGPGenerator
 
     latent_dim = int(inferred["latent_dim"])
     output_dim = int(inferred["output_dim"])
@@ -379,9 +379,9 @@ def _build_generator_from_checkpoint(
 
 
 def _compute_normalization_stats_for_model(train_df: pd.DataFrame, model_type: str) -> tuple[np.ndarray, np.ndarray]:
-    from gan_model import ParticleDataset as GANParticleDataset
-    from wgan_model import ParticleDataset as WGANParticleDataset
-    from wgan_gp_model import ParticleDataset as WGANGPParticleDataset
+    from models.gan_model import ParticleDataset as GANParticleDataset
+    from models.wgan_model import ParticleDataset as WGANParticleDataset
+    from models.wgan_gp_model import ParticleDataset as WGANGPParticleDataset
 
     if model_type in {"wgan-gp", "cwgan-gp"}:
         dataset = WGANGPParticleDataset(train_df)
@@ -541,7 +541,7 @@ def generate_synthetic_from_checkpoint(
             chunk = chunk * (std_gen + 1e-8) + mean_gen
 
             if apply_angle_clipping:
-                from wgan_gp_model import _apply_generation_bounds, BOUNDED_CLIP_FEATURES
+                from models.wgan_gp_model import _apply_generation_bounds, BOUNDED_CLIP_FEATURES
 
                 clip_feature_indices = {
                     name: idx
