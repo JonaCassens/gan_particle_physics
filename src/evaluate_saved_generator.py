@@ -1,8 +1,10 @@
 import argparse
 import glob
+import json
 import os
 import re
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Optional, Tuple, List, Dict, Any
 
@@ -774,6 +776,155 @@ def _load_torchscript_embedder(model_path: str, device: str) -> nn.Module:
     return model
 
 
+def _fmt_md(v, digits: int = 4) -> str:
+    if v is None:
+        return "—"
+    try:
+        return f"{float(v):.{digits}f}"
+    except (TypeError, ValueError):
+        return str(v)
+
+
+def _save_metrics_markdown(metrics: Dict[str, Any], output_path: str) -> None:
+    lines = [
+        "# Evaluation Metrics Report",
+        "",
+        f"_Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}_",
+        "",
+    ]
+
+    # --- Wasserstein distances ---
+    univariate = metrics.get("univariate") or []
+    if univariate:
+        lines += [
+            "## Wasserstein Distance (per feature)",
+            "",
+            "| Feature | Wasserstein |",
+            "|---------|-------------|",
+        ]
+        for row in sorted(univariate, key=lambda r: r.get("wasserstein", 0), reverse=True):
+            lines.append(f"| {row['variable']} | {_fmt_md(row.get('wasserstein'))} |")
+        lines.append("")
+
+    # --- MMD (dict form: {"mmd": float, ...}) ---
+    mmd_dict = metrics.get("mmd") or {}
+    mmd_val = mmd_dict.get("mmd") if isinstance(mmd_dict, dict) else mmd_dict
+    if mmd_val is not None:
+        lines += [
+            "## MMD (RBF kernel)",
+            "",
+            f"**MMD:** {_fmt_md(mmd_val, digits=6)}",
+            "",
+        ]
+
+    # --- C2ST (nested dict) ---
+    c2st = metrics.get("c2st") or {}
+    acc = c2st.get("accuracy")
+    bal_acc = c2st.get("balanced_accuracy")
+    roc_auc = c2st.get("roc_auc")
+    if any(v is not None for v in [acc, bal_acc, roc_auc]):
+        lines += [
+            "## C2ST",
+            "",
+            "| Metric | Value |",
+            "|--------|-------|",
+            f"| Accuracy | {_fmt_md(acc)} |",
+            f"| Balanced Accuracy | {_fmt_md(bal_acc)} |",
+            f"| ROC-AUC | {_fmt_md(roc_auc)} |",
+            "",
+        ]
+        feature_importance = c2st.get("feature_importance") or []
+        if feature_importance:
+            lines += [
+                "### Feature Importance",
+                "",
+                "| Feature | Importance (mean ± std) |",
+                "|---------|------------------------|",
+            ]
+            for fi in feature_importance:
+                mean = _fmt_md(fi.get("importance_mean"))
+                std = _fmt_md(fi.get("importance_std"))
+                lines.append(f"| {fi['feature']} | {mean} ± {std} |")
+            lines.append("")
+
+    # --- Baseline comparison ---
+    baseline = metrics.get("real_vs_real_baseline") or {}
+    delta = (metrics.get("delta_vs_real_baseline") or {}).get("delta") or {}
+    if baseline:
+        b_mmd = (baseline.get("mmd") or {}).get("mmd")
+        b_c2st = baseline.get("c2st") or {}
+        lines += [
+            "## Real-vs-Real Baseline",
+            "",
+            "| Metric | Synth vs Real | Real vs Real |",
+            "|--------|--------------|-------------|",
+            f"| MMD | {_fmt_md(mmd_val, digits=6)} | {_fmt_md(b_mmd, digits=6)} |",
+            f"| C2ST Accuracy | {_fmt_md(acc)} | {_fmt_md(b_c2st.get('accuracy'))} |",
+            f"| ROC-AUC | {_fmt_md(roc_auc)} | {_fmt_md(b_c2st.get('roc_auc'))} |",
+            "",
+        ]
+
+    # --- Per-PDG summary (cwgan-gp) ---
+    per_pdg_summary = metrics.get("per_pdg_summary") or {}
+    if per_pdg_summary:
+        pdg_codes = sorted(per_pdg_summary.keys(), key=lambda x: int(x) if str(x).lstrip("-").isdigit() else 0)
+        lines += [
+            "## Per-PDG Summary",
+            "",
+            "| PDG | N Real | N Synth | MMD |",
+            "|-----|--------|---------|-----|",
+        ]
+        for pdg in pdg_codes:
+            m = per_pdg_summary[pdg]
+            if m.get("status") == "skipped_empty_slice":
+                lines.append(f"| {pdg} | {m.get('n_real', '—')} | {m.get('n_synthetic', '—')} | skipped |")
+            else:
+                lines.append(
+                    f"| {pdg} | {m.get('n_real', '—')} | {m.get('n_synthetic', '—')} "
+                    f"| {_fmt_md(m.get('mmd'), digits=6)} |"
+                )
+        lines.append("")
+
+        # Load per-PDG C2ST feature importance from individual metric files if available
+        per_pdg_root = metrics.get("per_pdg_root")
+        if per_pdg_root:
+            any_importance = False
+            pdg_importance_data: Dict[str, List] = {}
+            for pdg in pdg_codes:
+                pdg_json = os.path.join(per_pdg_root, f"pdg_{pdg}", "metrics.json")
+                if os.path.isfile(pdg_json):
+                    try:
+                        with open(pdg_json) as f:
+                            pdg_full = json.load(f)
+                        fi = (pdg_full.get("c2st") or {}).get("feature_importance") or []
+                        if fi:
+                            pdg_importance_data[str(pdg)] = fi
+                            any_importance = True
+                    except Exception:
+                        pass
+            if any_importance:
+                lines.append("### Per-PDG Feature Importance")
+                lines.append("")
+                for pdg in pdg_codes:
+                    fi_list = pdg_importance_data.get(str(pdg)) or []
+                    if not fi_list:
+                        continue
+                    lines += [
+                        f"#### PDG {pdg}",
+                        "",
+                        "| Feature | Importance (mean ± std) |",
+                        "|---------|------------------------|",
+                    ]
+                    for fi in fi_list:
+                        mean = _fmt_md(fi.get("importance_mean"))
+                        std = _fmt_md(fi.get("importance_std"))
+                        lines.append(f"| {fi['feature']} | {mean} ± {std} |")
+                    lines.append("")
+
+    Path(output_path).write_text("\n".join(lines) + "\n")
+    print(f"Saved metrics report to: {output_path.replace('.json', '.md') if output_path.endswith('.json') else output_path}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Externally evaluate a saved generator checkpoint on test metrics.")
     parser.add_argument(
@@ -1207,6 +1358,10 @@ def main() -> None:
     os.makedirs(os.path.dirname(output_json), exist_ok=True)
     save_metrics_json(test_metrics, output_json)
     print(f"Saved external metrics to: {output_json}")
+
+    output_md = output_json.replace(".json", ".md")
+    _save_metrics_markdown(test_metrics, output_md)
+    print(f"Saved metrics report to: {output_md}")
 
 
 if __name__ == "__main__":

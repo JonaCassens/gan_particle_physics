@@ -5,6 +5,7 @@ Computes MMD, C2ST, and generates comparison plots.
 """
 import argparse
 import json
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 from numbers import Number
@@ -200,6 +201,128 @@ def restore_feature_markers(df: pd.DataFrame) -> pd.DataFrame:
     return restored
 
 
+def _fmt(v, digits=4):
+    if v is None:
+        return "—"
+    try:
+        return f"{float(v):.{digits}f}"
+    except (TypeError, ValueError):
+        return str(v)
+
+
+def _save_metrics_markdown(
+    metrics: dict,
+    output_path: Path,
+    per_pdg_summary: Optional[dict] = None,
+) -> None:
+    lines = [
+        "# Evaluation Metrics Report",
+        "",
+        f"_Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}_",
+        "",
+    ]
+
+    # --- Wasserstein distances ---
+    univariate = metrics.get("univariate") or []
+    if univariate:
+        lines += [
+            "## Wasserstein Distance (per feature)",
+            "",
+            "| Feature | Wasserstein |",
+            "|---------|-------------|",
+        ]
+        for row in sorted(univariate, key=lambda r: r.get("wasserstein", 0), reverse=True):
+            lines.append(f"| {row['variable']} | {_fmt(row.get('wasserstein'))} |")
+        lines.append("")
+
+    # --- MMD ---
+    mmd_val = metrics.get("mmd_rbf")
+    if mmd_val is not None:
+        lines += [
+            "## MMD (RBF kernel)",
+            "",
+            f"**MMD:** {_fmt(mmd_val, digits=6)}",
+            "",
+        ]
+
+    # --- C2ST (fields merged into root dict by evaluate_saved_data) ---
+    acc = metrics.get("accuracy")
+    bal_acc = metrics.get("balanced_accuracy")
+    roc_auc = metrics.get("roc_auc")
+    if any(v is not None for v in [acc, bal_acc, roc_auc]):
+        lines += [
+            "## C2ST",
+            "",
+            "| Metric | Value |",
+            "|--------|-------|",
+            f"| Accuracy | {_fmt(acc)} |",
+            f"| Balanced Accuracy | {_fmt(bal_acc)} |",
+            f"| ROC-AUC | {_fmt(roc_auc)} |",
+            "",
+        ]
+        feature_importance = metrics.get("feature_importance") or []
+        if feature_importance:
+            lines += [
+                "### Feature Importance",
+                "",
+                "| Feature | Importance (mean ± std) |",
+                "|---------|------------------------|",
+            ]
+            for fi in feature_importance:
+                mean = _fmt(fi.get("importance_mean"))
+                std = _fmt(fi.get("importance_std"))
+                lines.append(f"| {fi['feature']} | {mean} ± {std} |")
+            lines.append("")
+
+    # --- Per-PDG summary ---
+    if per_pdg_summary:
+        pdg_codes = sorted(per_pdg_summary.keys())
+        lines += [
+            "## Per-PDG Summary",
+            "",
+            "| PDG | N Truth | N Synth | MMD | C2ST Acc | Bal Acc | ROC-AUC |",
+            "|-----|---------|---------|-----|----------|---------|---------|",
+        ]
+        for pdg in pdg_codes:
+            m = per_pdg_summary[pdg]
+            lines.append(
+                f"| {pdg} "
+                f"| {m.get('n_truth', m.get('n_real', '—'))} "
+                f"| {m.get('n_synthetic', '—')} "
+                f"| {_fmt(m.get('mmd_rbf'), digits=6)} "
+                f"| {_fmt(m.get('accuracy'))} "
+                f"| {_fmt(m.get('balanced_accuracy'))} "
+                f"| {_fmt(m.get('roc_auc'))} |"
+            )
+        lines.append("")
+
+        # Per-PDG feature importance
+        any_importance = any(
+            (per_pdg_summary[p].get("feature_importance") or []) for p in pdg_codes
+        )
+        if any_importance:
+            lines.append("### Per-PDG Feature Importance")
+            lines.append("")
+            for pdg in pdg_codes:
+                fi_list = per_pdg_summary[pdg].get("feature_importance") or []
+                if not fi_list:
+                    continue
+                lines += [
+                    f"#### PDG {pdg}",
+                    "",
+                    "| Feature | Importance (mean ± std) |",
+                    "|---------|------------------------|",
+                ]
+                for fi in fi_list:
+                    mean = _fmt(fi.get("importance_mean"))
+                    std = _fmt(fi.get("importance_std"))
+                    lines.append(f"| {fi['feature']} | {mean} ± {std} |")
+                lines.append("")
+
+    output_path.write_text("\n".join(lines) + "\n")
+    print(f"[INFO] Saved metrics report to: {output_path}")
+
+
 def _compute_and_save_metrics(
     truth_sub: pd.DataFrame,
     synth_sub: pd.DataFrame,
@@ -375,10 +498,11 @@ def main() -> int:
             json.dump(metrics, f, indent=2)
 
     # Per-PDG evaluation
+    per_pdg_summary: dict = {}
     if args.per_pdg and "pdg" in common_cols:
         shared_pdgs = sorted(set(truth_df["pdg"].unique()) & set(synthetic_df["pdg"].unique()))
         print(f"\n[INFO] Running per-PDG evaluation for PDGs: {shared_pdgs}")
-        per_pdg_summary: dict[int, dict] = {}
+        per_pdg_summary = {}
 
         for pdg in shared_pdgs:
             t_sub = truth_df[truth_df["pdg"] == pdg].reset_index(drop=True)
@@ -415,6 +539,12 @@ def main() -> int:
                 f"  {m.get('accuracy', float('nan')):>10.4f}"
                 f"  {m.get('roc_auc', float('nan')):>10.4f}"
             )
+
+    _save_metrics_markdown(
+        metrics,
+        output_dir / "eval_metrics.md",
+        per_pdg_summary=per_pdg_summary or None,
+    )
 
     print(f"\n[INFO] Evaluation complete. Results in: {output_dir}")
     return 0
