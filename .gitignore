@@ -40,7 +40,7 @@ src/archive/
 condor/archive/
 
 # Notes (local only)
-notes/
+# notes/
 
 # OS
 .DS_Store
