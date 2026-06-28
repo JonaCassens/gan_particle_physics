@@ -12,7 +12,6 @@ log    = logs/eval_bounded_r_$(ClusterId).$(Process).log
 +MaxRuntime = 3600
 
 request_cpus   = 1
-request_gpus   = 1
 request_memory = 8GB
 request_disk   = 8GB
 
