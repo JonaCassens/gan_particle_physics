@@ -28,13 +28,35 @@ PDG_MASS_GEV = {
     3122: 1.115683,
 }
 DEFAULT_PARTICLE_MASS_GEV = PDG_MASS_GEV[13]
+# Data p_mag / t are stored in MeV, so the on-shell mass term must also be in MeV.
+PDG_MASS_MEV = {pdg: mass * 1000.0 for pdg, mass in PDG_MASS_GEV.items()}
+DEFAULT_PARTICLE_MASS_MEV = PDG_MASS_MEV[13]
 TRIG_CLIP_FEATURES = ("sin_phi_s", "cos_phi_s", "sin_theta", "cos_theta", "phi_p")
 POSITIVE_CLIP_FEATURES = ("log1p_r",)  # <-- fix
 BOUNDED_CLIP_FEATURES = TRIG_CLIP_FEATURES + POSITIVE_CLIP_FEATURES
+# Energy/momentum sector features coupled by the on-shell relation E = sqrt(p^2 + m^2).
+# log_t is reconstructed from log1p_p_mag at generation time; both indices are exposed
+# in clip_feature_indices so _apply_generation_bounds can perform the projection.
+ONSHELL_MOMENTUM_FEATURE = "log1p_p_mag"
+ONSHELL_ENERGY_FEATURE = "log_t"
+ONSHELL_CLIP_FEATURES = (ONSHELL_MOMENTUM_FEATURE, ONSHELL_ENERGY_FEATURE)
 UNIT_CIRCLE_PAIRS = (
     ("sin_phi_s", "cos_phi_s"),
     ("sin_theta", "cos_theta"),
 )
+
+
+def _onshell_log_t(p_mag, mass_mev):
+    """Return log_t = log(sqrt(p_mag^2 + m^2) + 1e-10) for np.ndarray or torch.Tensor.
+
+    Matches the exact log(t + 1e-10) form used in data_loader preprocessing so the
+    reconstructed log_t lines up with truth data.
+    """
+    if torch.is_tensor(p_mag):
+        energy = torch.sqrt(p_mag * p_mag + float(mass_mev) * float(mass_mev))
+        return torch.log(energy + 1e-10)
+    energy = np.sqrt(p_mag * p_mag + float(mass_mev) * float(mass_mev))
+    return np.log(energy + 1e-10)
 
 def _available_unit_circle_pairs(
     feature_index: dict[str, int],
@@ -42,8 +64,17 @@ def _available_unit_circle_pairs(
     """Return only the unit-circle pairs whose both features exist in feature_index."""
     return [(s, c) for (s, c) in UNIT_CIRCLE_PAIRS if s in feature_index and c in feature_index]
 
-def _apply_generation_bounds(samples: np.ndarray, clip_feature_indices: dict[str, int]) -> np.ndarray:
-    """Project selected sin/cos pairs to unit circle, then clip configured feature bounds."""
+def _apply_generation_bounds(
+    samples: np.ndarray,
+    clip_feature_indices: dict[str, int],
+    mass_mev: Optional[float] = None,
+) -> np.ndarray:
+    """Project selected sin/cos pairs to unit circle, then clip configured feature bounds.
+
+    When ``mass_mev`` is provided and both log1p_p_mag and log_t indices are present in
+    ``clip_feature_indices``, log_t is overwritten with the on-shell value derived from the
+    finalized p_mag, guaranteeing E = sqrt(p^2 + m^2) exactly (and t >= m).
+    """
     # 1) Unit-circle projection (generation-time)
     eps = 1e-8
     for sin_name, cos_name in UNIT_CIRCLE_PAIRS:
@@ -75,6 +106,14 @@ def _apply_generation_bounds(samples: np.ndarray, clip_feature_indices: dict[str
             continue
         lo, hi = clip_bounds[feature_name]
         samples[:, feature_idx] = np.clip(samples[:, feature_idx], lo, hi)
+
+    # 3) On-shell projection: reconstruct log_t from the finalized p_mag.
+    if mass_mev is not None:
+        momentum_idx = clip_feature_indices.get(ONSHELL_MOMENTUM_FEATURE)
+        energy_idx = clip_feature_indices.get(ONSHELL_ENERGY_FEATURE)
+        if momentum_idx is not None and energy_idx is not None:
+            p_mag = np.clip(np.expm1(samples[:, momentum_idx]), 0.0, None)
+            samples[:, energy_idx] = _onshell_log_t(p_mag, mass_mev)
 
     return samples
 
@@ -162,55 +201,48 @@ def _resolve_mass_from_dataframe(dataframe) -> tuple[float, str]:
     return float(DEFAULT_PARTICLE_MASS_GEV), "default:muon"
 
 
-def _make_energy_constraint(
+def _make_onshell_constraint(
     feature_index: dict[str, int],
     weight: float,
     mean: torch.Tensor,
     std: torch.Tensor,
-    target_mean_energy: float,
-    mass_gev: float,
+    mass_mev: float,
 ) -> Callable[[torch.Tensor], tuple[torch.Tensor, dict[str, float]]]:
-    """Build formula-based energy constraint using E = sqrt(p^2 + m^2)."""
+    """Build a per-sample on-shell coupling penalty between log_t and log1p_p_mag.
+
+    Penalizes (log_t_gen - log(sqrt(p_mag_gen^2 + m^2) + 1e-10))^2 so the generated energy
+    and momentum features satisfy E = sqrt(p^2 + m^2) sample-by-sample. Requires both
+    log1p_p_mag and log_t to be present in the feature set; otherwise a no-op.
+    """
     weight_value = float(weight)
     mean = mean.detach().clone()
     std = std.detach().clone()
-    target_mean_energy_value = float(target_mean_energy)
-    mass_value = float(mass_gev)
+    mass_value = float(mass_mev)
 
-    momentum_feature_name = None
-    for candidate in ENERGY_FEATURE_CANDIDATES:
-        if candidate in feature_index:
-            momentum_feature_name = candidate
-            break
+    momentum_idx = feature_index.get(ONSHELL_MOMENTUM_FEATURE)
+    energy_idx = feature_index.get(ONSHELL_ENERGY_FEATURE)
 
-    if momentum_feature_name is None:
+    if momentum_idx is None or energy_idx is None:
         def _noop(fake_data: torch.Tensor) -> tuple[torch.Tensor, dict[str, float]]:
             return fake_data.new_tensor(0.0), {}
         return _noop
-
-    momentum_idx = feature_index[momentum_feature_name]
-    uses_log_momentum = momentum_feature_name == "log1p_p_mag"
 
     def _constraint(fake_data: torch.Tensor) -> tuple[torch.Tensor, dict[str, float]]:
         m = mean.to(fake_data.device)
         s = std.to(fake_data.device)
 
-        momentum = fake_data[:, momentum_idx] * (s[momentum_idx] + 1e-8) + m[momentum_idx]
-        if uses_log_momentum:
-            momentum = torch.expm1(momentum)
-        momentum = torch.clamp(momentum, min=0.0)
+        log1p_p = fake_data[:, momentum_idx] * (s[momentum_idx] + 1e-8) + m[momentum_idx]
+        momentum = torch.clamp(torch.expm1(log1p_p), min=0.0)
+        log_t_gen = fake_data[:, energy_idx] * (s[energy_idx] + 1e-8) + m[energy_idx]
 
-        mass_sq = fake_data.new_tensor(mass_value * mass_value)
-        energy = torch.sqrt(momentum * momentum + mass_sq)
-
-        target_energy_tensor = fake_data.new_tensor(target_mean_energy_value)
-        penalty = (energy.mean() - target_energy_tensor) ** 2
+        log_t_target = _onshell_log_t(momentum, mass_value)
+        penalty = ((log_t_gen - log_t_target) ** 2).mean()
         loss = weight_value * penalty
 
         metrics = {
-            "energy_penalty": float(penalty.detach().item()),
-            "energy_mean_fake": float(energy.mean().detach().item()),
-            "energy_mean_target": target_mean_energy_value,
+            "onshell_penalty": float(penalty.detach().item()),
+            "log_t_mean_fake": float(log_t_gen.mean().detach().item()),
+            "log_t_mean_target": float(log_t_target.mean().detach().item()),
         }
         return loss, metrics
 
@@ -282,6 +314,7 @@ class WGAN_GP:
         self.input_dim = input_dim
         self.generator_constraints = list(generator_constraints) if generator_constraints else []
         self.clip_feature_indices: dict[str, int] = {}
+        self.onshell_mass_mev: Optional[float] = None
 
         self.generator = Generator(latent_dim, input_dim).to(device)
         self.critic = Critic(input_dim).to(device)
@@ -426,7 +459,7 @@ class WGAN_GP:
                 z = torch.randn(bs, self.latent_dim, device=self.device)
                 chunk = self.generator(z).detach().cpu().numpy()
                 chunk = chunk * (std_np + 1e-8) + mean_np
-                chunk = _apply_generation_bounds(chunk, self.clip_feature_indices)
+                chunk = _apply_generation_bounds(chunk, self.clip_feature_indices, mass_mev=self.onshell_mass_mev)
                 out_chunks.append(chunk)
 
         return np.concatenate(out_chunks, axis=0)
@@ -476,63 +509,52 @@ def train_wgan_gp(dataframe, selected_pdg: int, epochs=100, batch_size=512, late
                 )
             )
 
-    mass_source = None
-    if float(energy_constraint_weight) > 0.0:
-        momentum_feature_name = None
-        for candidate in ENERGY_FEATURE_CANDIDATES:
-            if candidate in feature_index:
-                momentum_feature_name = candidate
-                break
+    # Resolve the on-shell mass (MeV) from the CLI PDG. Always resolved so the hard
+    # generation-time projection applies even when the soft penalty weight is 0.
+    if energy_mass_mode != "pdg_lookup":
+        raise ValueError(
+            f"Unsupported energy_mass_mode={energy_mass_mode}; expected 'pdg_lookup'"
+        )
+    pdg_abs = int(np.abs(int(selected_pdg)))
+    resolved_mass_mev = PDG_MASS_MEV.get(pdg_abs)
+    if resolved_mass_mev is None:
+        onshell_mass_mev = float(DEFAULT_PARTICLE_MASS_MEV)
+        mass_source = f"cli_pdg_default:{pdg_abs}"
+        print(
+            "⚠️ On-shell mass fallback to muon mass "
+            f"({DEFAULT_PARTICLE_MASS_MEV:.6f} MeV); unsupported CLI PDG={selected_pdg}"
+        )
+    else:
+        onshell_mass_mev = float(resolved_mass_mev)
+        mass_source = f"cli_pdg:{pdg_abs}"
 
-        if momentum_feature_name is None:
+    have_onshell_features = (
+        ONSHELL_MOMENTUM_FEATURE in feature_index and ONSHELL_ENERGY_FEATURE in feature_index
+    )
+    if float(energy_constraint_weight) > 0.0:
+        if not have_onshell_features:
             message = (
-                "Energy constraint disabled; missing momentum feature. "
-                f"Expected one of: {list(ENERGY_FEATURE_CANDIDATES)}"
+                "On-shell constraint disabled; requires both "
+                f"{ONSHELL_MOMENTUM_FEATURE} and {ONSHELL_ENERGY_FEATURE} in columns="
+                f"{list(dataframe.columns)}"
             )
             if energy_missing_policy == "warn_disable":
                 print(f"⚠️ {message}")
             else:
                 raise ValueError(message)
         else:
-            if energy_mass_mode == "pdg_lookup":
-                pdg_abs = int(np.abs(int(selected_pdg)))
-                resolved_mass = PDG_MASS_GEV.get(pdg_abs)
-                if resolved_mass is None:
-                    mass_gev = float(DEFAULT_PARTICLE_MASS_GEV)
-                    mass_source = f"cli_pdg_default:{pdg_abs}"
-                else:
-                    mass_gev = float(resolved_mass)
-                    mass_source = f"cli_pdg:{pdg_abs}"
-            else:
-                raise ValueError(
-                    f"Unsupported energy_mass_mode={energy_mass_mode}; expected 'pdg_lookup'"
-                )
-
-            if mass_source.startswith("cli_pdg_default:"):
-                print(
-                    "⚠️ Energy constraint mass fallback to muon mass "
-                    f"({DEFAULT_PARTICLE_MASS_GEV:.6f} GeV); unsupported CLI PDG={selected_pdg}"
-                )
-
-            momentum_values = train_df[momentum_feature_name].values.astype(np.float32)
-            if momentum_feature_name == "log1p_p_mag":
-                momentum_values = np.expm1(momentum_values)
-            momentum_values = np.clip(momentum_values, a_min=0.0, a_max=None)
-
-            target_mean_energy = float(np.mean(np.sqrt(momentum_values * momentum_values + mass_gev * mass_gev)))
             print(
-                f"→ Energy constraint enabled: feature={momentum_feature_name}, "
-                f"mass_source={mass_source}, target_mean_E={target_mean_energy:.6f}"
+                f"→ On-shell constraint enabled: coupling {ONSHELL_ENERGY_FEATURE} to "
+                f"{ONSHELL_MOMENTUM_FEATURE}, mass_source={mass_source}, "
+                f"mass={onshell_mass_mev:.6f} MeV, weight={float(energy_constraint_weight):.4g}"
             )
-
             generator_constraints.append(
-                _make_energy_constraint(
+                _make_onshell_constraint(
                     feature_index,
                     weight=energy_constraint_weight,
                     mean=dataset.mean,
                     std=dataset.std,
-                    target_mean_energy=target_mean_energy,
-                    mass_gev=mass_gev,
+                    mass_mev=onshell_mass_mev,
                 )
             )
 
@@ -570,9 +592,11 @@ def train_wgan_gp(dataframe, selected_pdg: int, epochs=100, batch_size=512, late
 
     wgan_gp.clip_feature_indices = {
         name: feature_index[name]
-        for name in BOUNDED_CLIP_FEATURES
+        for name in BOUNDED_CLIP_FEATURES + ONSHELL_CLIP_FEATURES
         if name in feature_index
     }
+    # Enable hard on-shell projection at generation only when both coupled features exist.
+    wgan_gp.onshell_mass_mev = onshell_mass_mev if have_onshell_features else None
 
     print(f"Training WGAN-GP for {epochs} epochs on {device}...")
     print(f"Train: {len(train_df)} samples, Validation: {len(val_df)} samples")
@@ -582,7 +606,7 @@ def train_wgan_gp(dataframe, selected_pdg: int, epochs=100, batch_size=512, late
         "g_loss": [],
         "g_constraint_loss": [],
         "trig_penalty": [],
-        "energy_penalty": [],
+        "onshell_penalty": [],
         "train_wasserstein": [],
         "val_wasserstein": [],
         "train_mmd": [],
@@ -602,7 +626,7 @@ def train_wgan_gp(dataframe, selected_pdg: int, epochs=100, batch_size=512, late
         c_losses, g_losses = [], []
         g_constraint_losses = []
         trig_penalties = []
-        energy_penalties = []
+        onshell_penalties = []
         for batch in dataloader:
             batch = batch.to(device, non_blocking=True)
             c_loss, g_loss, step_metrics = wgan_gp.train_step(
@@ -615,14 +639,14 @@ def train_wgan_gp(dataframe, selected_pdg: int, epochs=100, batch_size=512, late
             g_constraint_losses.append(float(step_metrics.get("g_constraint_loss", 0.0)))
             if "trig_penalty" in step_metrics:
                 trig_penalties.append(float(step_metrics["trig_penalty"]))
-            if "energy_penalty" in step_metrics:
-                energy_penalties.append(float(step_metrics["energy_penalty"]))
+            if "onshell_penalty" in step_metrics:
+                onshell_penalties.append(float(step_metrics["onshell_penalty"]))
 
         avg_c_loss = float(np.mean(c_losses))
         avg_g_loss = float(np.mean(g_losses))
         avg_g_constraint_loss = float(np.mean(g_constraint_losses)) if g_constraint_losses else 0.0
         avg_trig_penalty = float(np.mean(trig_penalties)) if trig_penalties else 0.0
-        avg_energy_penalty = float(np.mean(energy_penalties)) if energy_penalties else 0.0
+        avg_onshell_penalty = float(np.mean(onshell_penalties)) if onshell_penalties else 0.0
 
         # Keep WD every epoch
         train_wd, train_wd_per_var = wgan_gp.compute_validation_wasserstein(
@@ -674,7 +698,7 @@ def train_wgan_gp(dataframe, selected_pdg: int, epochs=100, batch_size=512, late
         history["g_loss"].append(avg_g_loss)
         history["g_constraint_loss"].append(avg_g_constraint_loss)
         history["trig_penalty"].append(avg_trig_penalty)
-        history["energy_penalty"].append(avg_energy_penalty)
+        history["onshell_penalty"].append(avg_onshell_penalty)
         history["train_wasserstein"].append(train_wd)
         history["val_wasserstein"].append(val_wd)
         history["train_mmd"].append(train_mmd_metrics["mmd"])
@@ -747,6 +771,8 @@ def train_wgan_gp(dataframe, selected_pdg: int, epochs=100, batch_size=512, late
         "energy_missing_policy": str(energy_missing_policy),
         "selected_pdg": int(selected_pdg),
         "mass_source": str(mass_source),
+        "onshell_mass_mev": float(onshell_mass_mev),
+        "onshell_projection_enabled": bool(have_onshell_features),
     }
     history["lr_scheduler_config"] = {
         "type": "StepLR",

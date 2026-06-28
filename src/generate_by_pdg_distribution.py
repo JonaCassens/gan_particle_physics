@@ -11,6 +11,7 @@ import torch
 
 from utils import generate_synthetic_from_checkpoint
 from data_loader import load_preprocessed_data
+from models.wgan_gp_model import PDG_MASS_MEV
 
 
 GAN_RESULTS_ROOT = "/home/hep/jcc525/gan_particle_physics/gan_results"
@@ -246,6 +247,7 @@ def main() -> int:
             device=device,
             batch_size=int(args.batch_size),
             apply_angle_clipping=True,
+            onshell_mass_mev=PDG_MASS_MEV.get(abs(int(pdg_code))),
         )
         df = pd.DataFrame(result["samples"], columns=result["feature_names"])
         df.insert(0, "pdg", pdg_code)
