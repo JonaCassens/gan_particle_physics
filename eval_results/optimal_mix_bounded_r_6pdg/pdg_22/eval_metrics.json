@@ -1,0 +1,120 @@
+{
+  "univariate": [
+    {
+      "variable": "cos_phi_s",
+      "ks_stat": 0.025710007201829144,
+      "ks_p": 1.8498203463220572e-33,
+      "wasserstein": 0.026977681655991417
+    },
+    {
+      "variable": "cos_theta",
+      "ks_stat": 0.014515858414845484,
+      "ks_p": 5.887761574519127e-11,
+      "wasserstein": 0.01214992712541285
+    },
+    {
+      "variable": "phi_p",
+      "ks_stat": 0.038385507517900874,
+      "ks_p": 4.541814635716792e-74,
+      "wasserstein": 0.07882506644116284
+    },
+    {
+      "variable": "sin_phi_s",
+      "ks_stat": 0.03062631444909447,
+      "ks_p": 2.6573236314740432e-47,
+      "wasserstein": 0.019676179023139527
+    },
+    {
+      "variable": "sin_theta",
+      "ks_stat": 0.011016185354768365,
+      "ks_p": 1.7183611723301428e-06,
+      "wasserstein": 0.00472418662710825
+    },
+    {
+      "variable": "t",
+      "ks_stat": 0.059496557079748436,
+      "ks_p": 2.021485525610287e-177,
+      "wasserstein": 0.07280223281540633
+    }
+  ],
+  "correlation_diff": {
+    "mean_abs_diff": 0.02549055963754654,
+    "max_abs_diff": 0.0988301932811737,
+    "median_abs_diff": 0.016356833279132843
+  },
+  "mmd": 0.021960425361464333,
+  "mmd2": 0.0004822602820564459,
+  "sigma": 3.1258089542388916,
+  "gamma": 0.05117350247688,
+  "n_real": 5000.0,
+  "n_synthetic": 5000.0,
+  "max_samples": 5000.0,
+  "chunk_size": 1024.0,
+  "unbiased": 1.0,
+  "backend": "numpy",
+  "device": "cpu",
+  "mmd_rbf": 0.021960425361464333,
+  "accuracy": 0.526625,
+  "balanced_accuracy": 0.5267548827157518,
+  "roc_auc": 0.5385361551261021,
+  "confusion_matrix": {
+    "true_negatives": 8548,
+    "false_positives": 11478,
+    "false_negatives": 7457,
+    "true_positives": 12517
+  },
+  "sample_counts": {
+    "real": 100000,
+    "synthetic": 100000
+  },
+  "config": {
+    "max_samples_per_class": 100000,
+    "epochs": 50,
+    "hidden_dim": 64,
+    "batch_size": 1024,
+    "train_test_split": 0.8,
+    "importance_repeats": 5,
+    "importance_max_samples": 20000,
+    "device_requested": "cpu",
+    "device_used": "cpu"
+  },
+  "feature_importance": [
+    {
+      "feature": "sin_phi_s",
+      "importance_mean": 0.01241152200958313,
+      "importance_std": 0.0024686701232898276,
+      "importance_repeats": 5
+    },
+    {
+      "feature": "cos_phi_s",
+      "importance_mean": 0.010979324465163209,
+      "importance_std": 0.0020303975899767916,
+      "importance_repeats": 5
+    },
+    {
+      "feature": "phi_p",
+      "importance_mean": 0.009937561703569343,
+      "importance_std": 0.001967510497928575,
+      "importance_repeats": 5
+    },
+    {
+      "feature": "t",
+      "importance_mean": 0.005334850320354944,
+      "importance_std": 0.0011462482645951445,
+      "importance_repeats": 5
+    },
+    {
+      "feature": "cos_theta",
+      "importance_mean": 0.004382133649575714,
+      "importance_std": 0.0013353982044870631,
+      "importance_repeats": 5
+    },
+    {
+      "feature": "sin_theta",
+      "importance_mean": 0.0023754940682408467,
+      "importance_std": 0.0014374332615263612,
+      "importance_repeats": 5
+    }
+  ],
+  "interpretation": "Accuracy near 0.5 indicates synthetic and real data are indistinguishable (good fit). Accuracy near 1.0 indicates classifier easily separates them (poor fit). ROC-AUC near 0.5 is better (synthetic \u2248 real); ROC-AUC near 1.0 is worse."
+}
