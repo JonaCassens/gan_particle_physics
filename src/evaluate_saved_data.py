@@ -99,6 +99,12 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Comma-separated PDG codes to keep in truth data only (e.g. '-11,11,2112')",
     )
+    parser.add_argument(
+        "--per-pdg",
+        action="store_true",
+        default=False,
+        help="Also compute metrics separately for each PDG code present in both datasets",
+    )
     return parser.parse_args()
 
 
@@ -194,6 +200,99 @@ def restore_feature_markers(df: pd.DataFrame) -> pd.DataFrame:
     return restored
 
 
+def _compute_and_save_metrics(
+    truth_sub: pd.DataFrame,
+    synth_sub: pd.DataFrame,
+    metric_cols: list[str],
+    output_dir: Path,
+    mmd_sigma: str,
+    seed: int,
+    label: str,
+) -> dict:
+    """Run full metric suite on pre-filtered DataFrames and save to output_dir."""
+    import matplotlib.pyplot as plt
+
+    t_feat = truth_sub[metric_cols]
+    s_feat = synth_sub[metric_cols]
+
+    metrics = compute_metrics(t_feat, s_feat)
+
+    mmd_out = compute_mmd_rbf(t_feat.values, s_feat.values, sigma=mmd_sigma, seed=seed)
+    if isinstance(mmd_out, dict):
+        for k, v in mmd_out.items():
+            metrics[k] = float(v) if isinstance(v, Number) else v
+        if "mmd_rbf" not in metrics:
+            if "mmd" in mmd_out and isinstance(mmd_out["mmd"], Number):
+                metrics["mmd_rbf"] = float(mmd_out["mmd"])
+            else:
+                raise ValueError("compute_mmd_rbf returned a dict without a numeric 'mmd' or 'mmd_rbf'.")
+    else:
+        metrics["mmd_rbf"] = float(mmd_out)
+
+    c2st_dict = compute_c2st_metrics(t_feat, s_feat, seed=seed)
+    metrics.update(c2st_dict)
+
+    print(f"\n[METRICS] {label}")
+    for key, val in sorted(metrics.items()):
+        if isinstance(val, Number):
+            print(f"  {key}: {float(val):.6f}")
+        else:
+            print(f"  {key}: {val}")
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    metrics_path = output_dir / "eval_metrics.json"
+    with open(metrics_path, "w") as f:
+        json.dump(metrics, f, indent=2)
+    print(f"[INFO] Saved metrics to: {metrics_path}")
+
+    # 2D comparison plots
+    n_features = len(metric_cols)
+    n_pairs = n_features * (n_features - 1) // 2
+    pairs_per_row = 4
+    n_cols = pairs_per_row * 2
+    n_rows = (n_pairs + pairs_per_row - 1) // pairs_per_row
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(4 * n_cols, 4 * n_rows), dpi=100)
+    axes = np.atleast_1d(axes).flatten()
+
+    pair_idx = 0
+    for i, fx in enumerate(metric_cols):
+        for j, fy in enumerate(metric_cols):
+            if i >= j:
+                continue
+            ax_truth = axes[pair_idx * 2]
+            ax_synth = axes[pair_idx * 2 + 1]
+            try:
+                x_range = get_histogram_range(truth_sub[fx].values, synth_sub[fx].values)
+                y_range = get_histogram_range(truth_sub[fy].values, synth_sub[fy].values)
+                if x_range is None or y_range is None:
+                    x_range, y_range = None, None
+                plot_2d_hist_with_stats(
+                    ax_truth, truth_sub[fx].values, truth_sub[fy].values,
+                    fx, fy, f"Truth: {fx} vs {fy}", cmap="viridis",
+                    x_range=x_range, y_range=y_range,
+                )
+                plot_2d_hist_with_stats(
+                    ax_synth, synth_sub[fx].values, synth_sub[fy].values,
+                    fx, fy, f"Synthetic: {fx} vs {fy}", cmap="viridis",
+                    x_range=x_range, y_range=y_range,
+                )
+            except Exception as e:
+                ax_truth.text(0.5, 0.5, f"Error:\n{str(e)}", ha="center", va="center")
+                ax_synth.text(0.5, 0.5, f"Error:\n{str(e)}", ha="center", va="center")
+            pair_idx += 1
+
+    for idx in range(pair_idx * 2, len(axes)):
+        axes[idx].axis("off")
+
+    plt.tight_layout()
+    plot_path = output_dir / "eval_2d_comparisons.png"
+    plt.savefig(plot_path, dpi=100, bbox_inches="tight")
+    print(f"[INFO] Saved plot to: {plot_path}")
+    plt.close()
+
+    return metrics
+
+
 def main() -> int:
     args = parse_args()
     output_dir = Path(args.output_dir)
@@ -207,7 +306,7 @@ def main() -> int:
         raise ValueError("No common columns between truth and synthetic parquet files.")
 
     truth_load_cols = set(common_schema_cols)
-    if truth_pdg_allowlist is not None:
+    if truth_pdg_allowlist is not None or args.per_pdg:
         truth_load_cols.add("pdg")
     truth_load_cols = sorted(col for col in truth_load_cols if col in truth_schema_cols)
 
@@ -259,36 +358,11 @@ def main() -> int:
         print(f"[INFO] Truth PDG counts: {truth_pdg_counts}")
         print(f"[INFO] Synthetic PDG counts: {synthetic_pdg_counts}")
 
-    truth_metrics_df = truth_df[metric_cols]
-    synthetic_metrics_df = synthetic_df[metric_cols]
-
-    # Compute metrics
-    print("\n[INFO] Computing metrics...")
-    metrics = compute_metrics(truth_metrics_df, synthetic_metrics_df)
-
-    mmd_out = compute_mmd_rbf(
-        truth_metrics_df.values,
-        synthetic_metrics_df.values,
-        sigma=args.mmd_sigma,
-        seed=args.seed,
+    # Combined evaluation
+    print("\n[INFO] Computing combined metrics...")
+    metrics = _compute_and_save_metrics(
+        truth_df, synthetic_df, metric_cols, output_dir, args.mmd_sigma, args.seed, label="combined"
     )
-
-    # Handle both return types: scalar or dict
-    if isinstance(mmd_out, dict):
-        for k, v in mmd_out.items():
-            metrics[k] = float(v) if isinstance(v, Number) else v
-        if "mmd_rbf" not in metrics:
-            if "mmd" in mmd_out and isinstance(mmd_out["mmd"], Number):
-                metrics["mmd_rbf"] = float(mmd_out["mmd"])
-            else:
-                raise ValueError(
-                    "compute_mmd_rbf returned a dict without a numeric 'mmd' or 'mmd_rbf'."
-                )
-    else:
-        metrics["mmd_rbf"] = float(mmd_out)
-
-    c2st_dict = compute_c2st_metrics(truth_metrics_df, synthetic_metrics_df, seed=args.seed)
-    metrics.update(c2st_dict)
 
     if "pdg" in common_cols:
         metrics["pdg_context"] = {
@@ -296,89 +370,51 @@ def main() -> int:
             "truth_counts": truth_df["pdg"].value_counts(dropna=False).sort_index().to_dict(),
             "synthetic_counts": synthetic_df["pdg"].value_counts(dropna=False).sort_index().to_dict(),
         }
+        metrics_path = output_dir / "eval_metrics.json"
+        with open(metrics_path, "w") as f:
+            json.dump(metrics, f, indent=2)
 
-    print(f"\n[METRICS]")
-    for key, val in sorted(metrics.items()):
-        if isinstance(val, Number):
-            print(f"  {key}: {float(val):.6f}")
-        else:
-            print(f"  {key}: {val}")
+    # Per-PDG evaluation
+    if args.per_pdg and "pdg" in common_cols:
+        shared_pdgs = sorted(set(truth_df["pdg"].unique()) & set(synthetic_df["pdg"].unique()))
+        print(f"\n[INFO] Running per-PDG evaluation for PDGs: {shared_pdgs}")
+        per_pdg_summary: dict[int, dict] = {}
 
-    metrics_path = output_dir / "eval_metrics.json"
-    with open(metrics_path, "w") as f:
-        json.dump(metrics, f, indent=2)
-    print(f"\n[INFO] Saved metrics to: {metrics_path}")
-
-    # Plot 2D comparisons
-    print(f"\n[INFO] Generating 2D comparison plots...")
-    features = metric_cols
-    n_features = len(features)
-    n_pairs = n_features * (n_features - 1) // 2
-    pairs_per_row = 4
-
-    import matplotlib.pyplot as plt
-    n_cols = pairs_per_row * 2
-    n_rows = (n_pairs + pairs_per_row - 1) // pairs_per_row
-    figsize = (4 * n_cols, 4 * n_rows)
-
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=figsize, dpi=100)
-    axes = np.atleast_1d(axes).flatten()
-
-    pair_idx = 0
-    for i, fx in enumerate(features):
-        for j, fy in enumerate(features):
-            if i >= j:
+        for pdg in shared_pdgs:
+            t_sub = truth_df[truth_df["pdg"] == pdg].reset_index(drop=True)
+            s_sub = synthetic_df[synthetic_df["pdg"] == pdg].reset_index(drop=True)
+            if len(t_sub) < 10 or len(s_sub) < 10:
+                print(f"[WARN] PDG {pdg}: too few samples (truth={len(t_sub)}, synth={len(s_sub)}), skipping.")
                 continue
-            ax_truth = axes[pair_idx * 2]
-            ax_synth = axes[pair_idx * 2 + 1]
-            try:
-                x_range = get_histogram_range(
-                    truth_df[fx].values,
-                    synthetic_df[fx].values,
-                )
-                y_range = get_histogram_range(
-                    truth_df[fy].values,
-                    synthetic_df[fy].values,
-                )
-                if x_range is None or y_range is None:
-                    x_range, y_range = None, None
+            print(f"\n[INFO] PDG {pdg}: truth={len(t_sub):,}, synth={len(s_sub):,}")
+            pdg_dir = output_dir / f"pdg_{pdg}"
+            pdg_metrics = _compute_and_save_metrics(
+                t_sub, s_sub, metric_cols, pdg_dir, args.mmd_sigma, args.seed, label=f"PDG {pdg}"
+            )
+            pdg_metrics["n_truth"] = len(t_sub)
+            pdg_metrics["n_synthetic"] = len(s_sub)
+            per_pdg_summary[pdg] = pdg_metrics
 
-                plot_2d_hist_with_stats(
-                    ax_truth,
-                    truth_df[fx].values,
-                    truth_df[fy].values,
-                    fx,
-                    fy,
-                    f"Truth: {fx} vs {fy}",
-                    cmap="viridis",
-                    x_range=x_range,
-                    y_range=y_range,
-                )
+        summary_path = output_dir / "eval_metrics_per_pdg.json"
+        with open(summary_path, "w") as f:
+            json.dump({str(k): v for k, v in per_pdg_summary.items()}, f, indent=2)
+        print(f"\n[INFO] Saved per-PDG summary to: {summary_path}")
 
-                plot_2d_hist_with_stats(
-                    ax_synth,
-                    synthetic_df[fx].values,
-                    synthetic_df[fy].values,
-                    fx,
-                    fy,
-                    f"Synthetic: {fx} vs {fy}",
-                    cmap="viridis",
-                    x_range=x_range,
-                    y_range=y_range,
-                )
-            except Exception as e:
-                ax_truth.text(0.5, 0.5, f"Error:\n{str(e)}", ha="center", va="center")
-                ax_synth.text(0.5, 0.5, f"Error:\n{str(e)}", ha="center", va="center")
-            pair_idx += 1
-
-    for idx in range(pair_idx * 2, len(axes)):
-        axes[idx].axis("off")
-
-    plt.tight_layout()
-    plot_path = output_dir / "eval_2d_comparisons.png"
-    plt.savefig(plot_path, dpi=100, bbox_inches="tight")
-    print(f"[INFO] Saved plot to: {plot_path}")
-    plt.close()
+        # Print compact per-PDG table
+        scalar_keys = ["mmd_rbf", "accuracy", "roc_auc"]
+        header = f"{'PDG':>8}  {'n_truth':>8}  {'n_synth':>8}  {'mmd_rbf':>10}  {'c2st_acc':>10}  {'roc_auc':>10}"
+        print(f"\n[SUMMARY] Per-PDG metrics")
+        print(header)
+        for pdg in shared_pdgs:
+            if pdg not in per_pdg_summary:
+                continue
+            m = per_pdg_summary[pdg]
+            print(
+                f"{pdg:>8}  {m.get('n_truth', 0):>8}  {m.get('n_synthetic', 0):>8}"
+                f"  {m.get('mmd_rbf', float('nan')):>10.4f}"
+                f"  {m.get('accuracy', float('nan')):>10.4f}"
+                f"  {m.get('roc_auc', float('nan')):>10.4f}"
+            )
 
     print(f"\n[INFO] Evaluation complete. Results in: {output_dir}")
     return 0
