@@ -32,7 +32,7 @@ DEFAULT_PARTICLE_MASS_GEV = PDG_MASS_GEV[13]
 PDG_MASS_MEV = {pdg: mass * 1000.0 for pdg, mass in PDG_MASS_GEV.items()}
 DEFAULT_PARTICLE_MASS_MEV = PDG_MASS_MEV[13]
 TRIG_CLIP_FEATURES = ("sin_phi_s", "cos_phi_s", "sin_theta", "cos_theta", "phi_p")
-POSITIVE_CLIP_FEATURES = ("log1p_r",)  # <-- fix
+POSITIVE_CLIP_FEATURES = ()
 BOUNDED_CLIP_FEATURES = TRIG_CLIP_FEATURES + POSITIVE_CLIP_FEATURES
 # Energy/momentum sector features coupled by the on-shell relation E = sqrt(p^2 + m^2).
 # log_t is reconstructed from log1p_p_mag at generation time; both indices are exposed
@@ -97,7 +97,6 @@ def _apply_generation_bounds(
         "sin_theta": (-1.0, 1.0),
         "cos_theta": (-1.0, 1.0),
         "phi_p": (-np.pi, np.pi),
-        "log1p_r": (0.0, np.log1p(350.5)),
         "p_mag": (0.0, np.inf),
     }
     for feature_name in BOUNDED_CLIP_FEATURES:

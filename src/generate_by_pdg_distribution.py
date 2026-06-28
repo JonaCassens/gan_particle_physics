@@ -18,6 +18,11 @@ GAN_RESULTS_ROOT = "/home/hep/jcc525/gan_particle_physics/gan_results"
 DEFAULT_SYNTHETIC_OUTPUT_DIR = "/home/hep/jcc525/gan_particle_physics/synthetic_data"
 DEFAULT_REFERENCE_PARQUET = "/home/hep/jcc525/cleaned_data/pdgNone_monitor4.parquet"
 
+# Uniform r cap applied to all generated samples via rejection sampling.
+# log1p(350.4279) ≈ 5.862005 — matches the training data upper bound.
+TRUTH_R_MAX = 350.4279
+TRUTH_LOG1P_R_MAX = np.log1p(TRUTH_R_MAX)
+
 # Hardcoded counts from `/home/hep/jcc525/cleaned_data/pdgNone_monitor4.parquet`
 # analyzed on 2026-06-09 (full file, 215,409,934 rows).
 HARD_CODED_PDG_COUNTS: Dict[int, int] = {
@@ -158,6 +163,80 @@ def _resolve_device(device_flag: str) -> str:
     return "cuda" if torch.cuda.is_available() else "cpu"
 
 
+def _generate_with_r_rejection(
+    generator_path: str,
+    normalization_df: pd.DataFrame,
+    n_target: int,
+    log1p_r_max: float,
+    device: str,
+    batch_size: int,
+    onshell_mass_mev: Optional[float] = None,
+    max_iters: int = 20,
+) -> tuple[pd.DataFrame, list[str]]:
+    """Generate exactly n_target rows with log1p_r <= log1p_r_max via rejection sampling."""
+    collected: list[pd.DataFrame] = []
+    n_collected = 0
+    feature_names: list[str] = []
+    overshoot = 1.5
+    iter_num = 0
+
+    while n_collected < n_target:
+        if iter_num >= max_iters:
+            raise RuntimeError(
+                f"Rejection sampling did not converge after {max_iters} iterations "
+                f"(collected {n_collected}/{n_target}). "
+                f"log1p_r_max={log1p_r_max:.4f} may be too restrictive."
+            )
+        n_needed = n_target - n_collected
+        n_request = max(int(np.ceil(n_needed * overshoot)), batch_size)
+
+        result = generate_synthetic_from_checkpoint(
+            generator_path=generator_path,
+            train_df=normalization_df,
+            n_samples=n_request,
+            device=device,
+            batch_size=batch_size,
+            apply_angle_clipping=True,
+            onshell_mass_mev=onshell_mass_mev,
+        )
+        feature_names = result["feature_names"]
+        df = pd.DataFrame(result["samples"], columns=feature_names)
+
+        if "log1p_r" not in df.columns:
+            print("[WARN] 'log1p_r' not in generated columns; r-rejection skipped for this batch.")
+            collected.append(df.iloc[:n_needed])
+            n_collected += len(collected[-1])
+            break
+
+        accepted = df[df["log1p_r"] <= log1p_r_max]
+        n_accept = len(accepted)
+
+        if n_accept == 0:
+            print(
+                f"[WARN] iter={iter_num}: zero accepted rows (log1p_r_max={log1p_r_max:.4f}); "
+                "widening overshoot."
+            )
+            overshoot = min(overshoot * 3.0, 50.0)
+            iter_num += 1
+            continue
+
+        accept_rate = float(n_accept) / float(n_request)
+        overshoot = max(1.05, 1.1 / accept_rate)
+
+        take = min(n_accept, n_needed)
+        collected.append(accepted.iloc[:take])
+        n_collected += take
+        print(
+            f"  [r-reject] iter={iter_num}: generated={n_request}, accepted={n_accept} "
+            f"(rate={accept_rate:.3f}), took={take}, total={n_collected}/{n_target}"
+        )
+        iter_num += 1
+
+    combined = pd.concat(collected, ignore_index=True)
+    assert len(combined) == n_target
+    return combined, feature_names
+
+
 def main() -> int:
     overall_start = time.perf_counter()
     args = parse_args()
@@ -239,17 +318,16 @@ def main() -> int:
         print(f"\n[STEP] Starting generation for folder={spec['folder']} (pdg={pdg_code}, n={n_gen})")
         print(f"       using loader source: {args.preprocessed_file}")
         print(f"       normalization rows={len(normalization_df)}, columns={list(normalization_df.columns)}")
-
-        result = generate_synthetic_from_checkpoint(
+        print(f"       r_max={TRUTH_R_MAX} (log1p_r_max={TRUTH_LOG1P_R_MAX:.6f})")
+        df, _ = _generate_with_r_rejection(
             generator_path=spec["generator_path"],
-            train_df=normalization_df,
-            n_samples=n_gen,
+            normalization_df=normalization_df,
+            n_target=n_gen,
+            log1p_r_max=TRUTH_LOG1P_R_MAX,
             device=device,
             batch_size=int(args.batch_size),
-            apply_angle_clipping=True,
             onshell_mass_mev=PDG_MASS_MEV.get(abs(int(pdg_code))),
         )
-        df = pd.DataFrame(result["samples"], columns=result["feature_names"])
         df.insert(0, "pdg", pdg_code)
         frames.append(df)
         total_generated += len(df)
@@ -265,17 +343,6 @@ def main() -> int:
 
     mixed_df = pd.concat(frames, ignore_index=True)
     mixed_df = mixed_df.sample(frac=1.0, random_state=args.seed).reset_index(drop=True)
-
-    # Apply physical solenoid radius bound: discard any row with r >= 350.5
-    R_MAX = 350.5
-    if "r" in mixed_df.columns:
-        before = len(mixed_df)
-        mixed_df = mixed_df[mixed_df["r"] < R_MAX].reset_index(drop=True)
-        after = len(mixed_df)
-        if before != after:
-            print(f"[INFO] r-clip: removed {before - after:,} rows with r >= {R_MAX} ({100.0*(before-after)/before:.2f}%)")
-    else:
-        print("[WARN] Column 'r' not found in merged DataFrame; r-clip skipped.")
 
     print(f"\nMerged DataFrame ready: rows={len(mixed_df)}, columns={list(mixed_df.columns)}")
 
