@@ -434,6 +434,7 @@ def generate_synthetic_from_checkpoint(
     apply_angle_clipping: Optional[bool] = None,
     conditional_pdg_codes: Optional[np.ndarray] = None,
     generator_output_columns: Optional[list[str]] = None,
+    onshell_mass_mev: Optional[float] = None,
 ) -> dict[str, Any]:
     if n_samples < 1:
         raise ValueError("n_samples must be >= 1")
@@ -541,14 +542,20 @@ def generate_synthetic_from_checkpoint(
             chunk = chunk * (std_gen + 1e-8) + mean_gen
 
             if apply_angle_clipping:
-                from models.wgan_gp_model import _apply_generation_bounds, BOUNDED_CLIP_FEATURES
+                from models.wgan_gp_model import (
+                    _apply_generation_bounds,
+                    BOUNDED_CLIP_FEATURES,
+                    ONSHELL_CLIP_FEATURES,
+                )
 
                 clip_feature_indices = {
                     name: idx
                     for idx, name in enumerate(generation_feature_names)
-                    if name in BOUNDED_CLIP_FEATURES
+                    if name in BOUNDED_CLIP_FEATURES + ONSHELL_CLIP_FEATURES
                 }
-                chunk = _apply_generation_bounds(chunk, clip_feature_indices)
+                chunk = _apply_generation_bounds(
+                    chunk, clip_feature_indices, mass_mev=onshell_mass_mev
+                )
 
             out[start:start + current_batch_size] = chunk.astype(np.float32, copy=False)
 

@@ -29,6 +29,7 @@ from models.wgan_gp_model import (
     ParticleDataset as WGANGPParticleDataset,
     _apply_generation_bounds,
     BOUNDED_CLIP_FEATURES,
+    PDG_MASS_MEV,
 )
 from models.cwgan_gp_model import CGenerator as CWGANGPGenerator
 
@@ -894,6 +895,15 @@ def main() -> None:
     print(f"Requested synthetic rows: {len(test_df):,}")
     print(f"Generation batch size: {DEFAULT_BATCH_SIZE:,}")
     generation_start_time = time.perf_counter()
+    # On-shell projection mass: only for the single-PDG (non-conditional) WGAN path.
+    # cwgan mass varies per sample by PDG, so projection is skipped (mass=None).
+    onshell_mass_mev = (
+        None
+        if (model_type == "cwgan-gp" or pdg is None)
+        else PDG_MASS_MEV.get(abs(int(pdg)))
+    )
+    if onshell_mass_mev is not None:
+        print(f"On-shell log_t projection enabled: pdg={pdg}, mass={onshell_mass_mev:.6f} MeV")
     generation_result = generate_synthetic_from_checkpoint(
         generator_path=generator_path,
         train_df=train_df,
@@ -904,6 +914,7 @@ def main() -> None:
         latent_dim=latent_dim,
         apply_angle_clipping=apply_angle_clipping,
         conditional_pdg_codes=(test_df["pdg"].to_numpy(dtype=np.int64) if (model_type == "cwgan-gp" and "pdg" in test_df.columns) else None),
+        onshell_mass_mev=onshell_mass_mev,
     )
     synthetic_data = generation_result["samples"]
     generation_feature_names = generation_result["feature_names"]
