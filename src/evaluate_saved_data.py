@@ -5,6 +5,7 @@ Computes MMD, C2ST, and generates comparison plots.
 """
 import argparse
 import json
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -106,6 +107,13 @@ def parse_args() -> argparse.Namespace:
         default=False,
         help="Also compute metrics separately for each PDG code present in both datasets",
     )
+    parser.add_argument(
+        "--device",
+        type=str,
+        default="auto",
+        choices=["auto", "cpu", "cuda"],
+        help="Device for MMD and C2ST (auto = use CUDA if available)",
+    )
     return parser.parse_args()
 
 
@@ -128,8 +136,11 @@ def read_parquet_limited(
     chunks: list[pd.DataFrame] = []
     remaining = n_rows
     rng = np.random.default_rng(seed)
+    total_loaded = 0
+    batch_num = 0
 
     for batch in pf.iter_batches(batch_size=batch_size, columns=columns):
+        batch_num += 1
         df = batch.to_pandas()
         if df.empty:
             continue
@@ -149,15 +160,19 @@ def read_parquet_limited(
 
         if remaining is None:
             chunks.append(df)
-            continue
-
-        if len(df) <= remaining:
+            total_loaded += len(df)
+        elif len(df) <= remaining:
             chunks.append(df)
             remaining -= len(df)
+            total_loaded += len(df)
         else:
             idx = rng.choice(len(df), size=remaining, replace=False)
             chunks.append(df.iloc[idx])
+            total_loaded += remaining
             remaining = 0
+
+        target_str = f"/{n_rows:,}" if n_rows is not None else ""
+        print(f"  [batch {batch_num}] loaded so far: {total_loaded:,}{target_str} rows", flush=True)
 
         if remaining == 0:
             break
@@ -331,6 +346,7 @@ def _compute_and_save_metrics(
     mmd_sigma: str,
     seed: int,
     label: str,
+    device: str = "cpu",
 ) -> dict:
     """Run full metric suite on pre-filtered DataFrames and save to output_dir."""
     import matplotlib.pyplot as plt
@@ -338,9 +354,14 @@ def _compute_and_save_metrics(
     t_feat = truth_sub[metric_cols]
     s_feat = synth_sub[metric_cols]
 
+    t0 = time.perf_counter()
+    print(f"  [{label}] computing Wasserstein distances ({len(t_feat):,} truth, {len(s_feat):,} synth)...", flush=True)
     metrics = compute_metrics(t_feat, s_feat)
+    print(f"  [{label}] Wasserstein done ({time.perf_counter() - t0:.1f}s)", flush=True)
 
-    mmd_out = compute_mmd_rbf(t_feat.values, s_feat.values, sigma=mmd_sigma, seed=seed, max_samples=200_000)
+    t0 = time.perf_counter()
+    print(f"  [{label}] computing MMD (sigma={mmd_sigma})...", flush=True)
+    mmd_out = compute_mmd_rbf(t_feat.values, s_feat.values, sigma=mmd_sigma, seed=seed, max_samples=200_000, chunk_size=512, device=device)
     if isinstance(mmd_out, dict):
         for k, v in mmd_out.items():
             metrics[k] = float(v) if isinstance(v, Number) else v
@@ -351,9 +372,13 @@ def _compute_and_save_metrics(
                 raise ValueError("compute_mmd_rbf returned a dict without a numeric 'mmd' or 'mmd_rbf'.")
     else:
         metrics["mmd_rbf"] = float(mmd_out)
+    print(f"  [{label}] MMD done ({time.perf_counter() - t0:.1f}s)", flush=True)
 
-    c2st_dict = compute_c2st_metrics(t_feat, s_feat, seed=seed, max_samples=500_000)
+    t0 = time.perf_counter()
+    print(f"  [{label}] computing C2ST (max 500k samples)...", flush=True)
+    c2st_dict = compute_c2st_metrics(t_feat, s_feat, seed=seed, max_samples=200_000, epochs=20, hidden_dim=128, device=device)
     metrics.update(c2st_dict)
+    print(f"  [{label}] C2ST done ({time.perf_counter() - t0:.1f}s)", flush=True)
 
     print(f"\n[METRICS] {label}")
     for key, val in sorted(metrics.items()):
@@ -369,6 +394,8 @@ def _compute_and_save_metrics(
     print(f"[INFO] Saved metrics to: {metrics_path}")
 
     # 2D comparison plots
+    t0 = time.perf_counter()
+    print(f"  [{label}] generating 2D comparison plots...", flush=True)
     n_features = len(metric_cols)
     n_pairs = n_features * (n_features - 1) // 2
     pairs_per_row = 4
@@ -410,14 +437,21 @@ def _compute_and_save_metrics(
     plt.tight_layout()
     plot_path = output_dir / "eval_2d_comparisons.png"
     plt.savefig(plot_path, dpi=100, bbox_inches="tight")
-    print(f"[INFO] Saved plot to: {plot_path}")
     plt.close()
+    print(f"  [{label}] plots done ({time.perf_counter() - t0:.1f}s) → {plot_path}", flush=True)
 
     return metrics
 
 
 def main() -> int:
+    main_start = time.perf_counter()
     args = parse_args()
+    import torch as _torch
+    if args.device == "auto":
+        device = "cuda" if _torch.cuda.is_available() else "cpu"
+    else:
+        device = args.device
+    print(f"[INFO] Using device: {device}")
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     truth_pdg_allowlist = parse_pdg_allowlist(args.truth_pdg_allowlist)
@@ -484,7 +518,7 @@ def main() -> int:
     # Combined evaluation
     print("\n[INFO] Computing combined metrics...")
     metrics = _compute_and_save_metrics(
-        truth_df, synthetic_df, metric_cols, output_dir, args.mmd_sigma, args.seed, label="combined"
+        truth_df, synthetic_df, metric_cols, output_dir, args.mmd_sigma, args.seed, label="combined", device=device,
     )
 
     if "pdg" in common_cols:
@@ -513,7 +547,7 @@ def main() -> int:
             print(f"\n[INFO] PDG {pdg}: truth={len(t_sub):,}, synth={len(s_sub):,}")
             pdg_dir = output_dir / f"pdg_{pdg}"
             pdg_metrics = _compute_and_save_metrics(
-                t_sub, s_sub, metric_cols, pdg_dir, args.mmd_sigma, args.seed, label=f"PDG {pdg}"
+                t_sub, s_sub, metric_cols, pdg_dir, args.mmd_sigma, args.seed, label=f"PDG {pdg}", device=device,
             )
             pdg_metrics["n_truth"] = len(t_sub)
             pdg_metrics["n_synthetic"] = len(s_sub)
@@ -546,7 +580,7 @@ def main() -> int:
         per_pdg_summary=per_pdg_summary or None,
     )
 
-    print(f"\n[INFO] Evaluation complete. Results in: {output_dir}")
+    print(f"\n[INFO] Evaluation complete in {time.perf_counter() - main_start:.1f}s. Results in: {output_dir}")
     return 0
 
 

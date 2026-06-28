@@ -1,7 +1,7 @@
 # HTCondor Submit File for Batched Preprocessing
 
 executable = /home/hep/jcc525/gan_particle_physics/condor/eval_script.sh
-arguments = --run-dir electron_no_x --pdg 11
+arguments = src/evaluate_saved_generator.py --run-dir electron_no_x --pdg 11
 
 initialdir = /home/hep/jcc525/gan_particle_physics/condor
 

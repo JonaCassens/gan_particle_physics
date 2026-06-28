@@ -1,0 +1,19 @@
+# HTCondor Submit: generate mixed synthetic parquet then evaluate against truth
+# Runs generate_by_pdg_distribution.py (all 6 optimal PDGs) followed by evaluate_saved_data.py
+
+executable = /home/hep/jcc525/gan_particle_physics/condor/generate_and_eval_script.sh
+
+initialdir = /home/hep/jcc525/gan_particle_physics/condor
+
+output = logs/gen_eval_$(ClusterId).$(Process).out
+error  = logs/gen_eval_$(ClusterId).$(Process).err
+log    = logs/gen_eval_$(ClusterId).$(Process).log
+
++MaxRuntime = 7200
+
+request_gpus   = 1
+request_cpus   = 2
+request_memory = 20GB
+request_disk   = 20GB
+
+queue 1
