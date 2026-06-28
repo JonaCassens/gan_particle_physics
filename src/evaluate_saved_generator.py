@@ -58,7 +58,7 @@ DEFAULT_C2ST_IMPORTANCE_MAX_SAMPLES = 50000
 
 # MMD is O(n²) — 200k is only tractable on GPU. Cap at 10k on CPU so it
 # finishes in seconds rather than hanging for hours.
-DEFAULT_MMD_MAX_SAMPLES = 200000 if DEFAULT_DEVICE == "cuda" else 10000
+DEFAULT_MMD_MAX_SAMPLES = 200000 if DEFAULT_DEVICE == "cuda" else 50000
 DEFAULT_MMD_CHUNK_SIZE = 512
 DEFAULT_MMD_SEED = 42
 
