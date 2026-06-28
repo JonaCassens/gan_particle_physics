@@ -105,6 +105,18 @@ def parse_args() -> argparse.Namespace:
         default=False,
         help="Also compute metrics separately for each PDG code present in both datasets",
     )
+    parser.add_argument(
+        "--mmd-max-samples",
+        type=int,
+        default=None,
+        help="Max samples per dataset for MMD computation (default: None = use all available)",
+    )
+    parser.add_argument(
+        "--c2st-max-samples",
+        type=int,
+        default=None,
+        help="Max samples per class for C2ST classifier training (default: None = use all available)",
+    )
     return parser.parse_args()
 
 
@@ -208,6 +220,8 @@ def _compute_and_save_metrics(
     mmd_sigma: str,
     seed: int,
     label: str,
+    mmd_max_samples: Optional[int] = None,
+    c2st_max_samples: Optional[int] = None,
 ) -> dict:
     """Run full metric suite on pre-filtered DataFrames and save to output_dir."""
     import matplotlib.pyplot as plt
@@ -217,7 +231,10 @@ def _compute_and_save_metrics(
 
     metrics = compute_metrics(t_feat, s_feat)
 
-    mmd_out = compute_mmd_rbf(t_feat.values, s_feat.values, sigma=mmd_sigma, seed=seed)
+    mmd_kwargs = dict(sigma=mmd_sigma, seed=seed)
+    if mmd_max_samples is not None:
+        mmd_kwargs["max_samples"] = mmd_max_samples
+    mmd_out = compute_mmd_rbf(t_feat.values, s_feat.values, **mmd_kwargs)
     if isinstance(mmd_out, dict):
         for k, v in mmd_out.items():
             metrics[k] = float(v) if isinstance(v, Number) else v
@@ -229,7 +246,10 @@ def _compute_and_save_metrics(
     else:
         metrics["mmd_rbf"] = float(mmd_out)
 
-    c2st_dict = compute_c2st_metrics(t_feat, s_feat, seed=seed)
+    c2st_kwargs = dict(seed=seed)
+    if c2st_max_samples is not None:
+        c2st_kwargs["max_samples"] = c2st_max_samples
+    c2st_dict = compute_c2st_metrics(t_feat, s_feat, **c2st_kwargs)
     metrics.update(c2st_dict)
 
     print(f"\n[METRICS] {label}")
@@ -361,7 +381,10 @@ def main() -> int:
     # Combined evaluation
     print("\n[INFO] Computing combined metrics...")
     metrics = _compute_and_save_metrics(
-        truth_df, synthetic_df, metric_cols, output_dir, args.mmd_sigma, args.seed, label="combined"
+        truth_df, synthetic_df, metric_cols, output_dir, args.mmd_sigma, args.seed,
+        label="combined",
+        mmd_max_samples=args.mmd_max_samples,
+        c2st_max_samples=args.c2st_max_samples,
     )
 
     if "pdg" in common_cols:
@@ -389,7 +412,10 @@ def main() -> int:
             print(f"\n[INFO] PDG {pdg}: truth={len(t_sub):,}, synth={len(s_sub):,}")
             pdg_dir = output_dir / f"pdg_{pdg}"
             pdg_metrics = _compute_and_save_metrics(
-                t_sub, s_sub, metric_cols, pdg_dir, args.mmd_sigma, args.seed, label=f"PDG {pdg}"
+                t_sub, s_sub, metric_cols, pdg_dir, args.mmd_sigma, args.seed,
+                label=f"PDG {pdg}",
+                mmd_max_samples=args.mmd_max_samples,
+                c2st_max_samples=args.c2st_max_samples,
             )
             pdg_metrics["n_truth"] = len(t_sub)
             pdg_metrics["n_synthetic"] = len(s_sub)
