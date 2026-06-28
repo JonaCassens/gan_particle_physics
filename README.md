@@ -18,21 +18,26 @@ Workflow for generating synthetic COMET experiment particle physics data using a
 ```
 gan_particle_physics/
 ├── src/
-│   ├── main.py                      # Main pipeline orchestration
-│   ├── data_loader.py               # ROOT file loading, feature extraction, parquet I/O
-│   ├── gan_model.py                 # Vanilla GAN model definition and training
-│   ├── wgan_model.py                # WGAN model definition and training
-│   ├── wgan_gp_model.py             # WGAN-GP model with gradient penalty
-│   ├── cwgan_gp_model.py            # Conditional WGAN-GP conditioned on PDG code
-│   ├── evaluate_saved_generator.py  # Offline evaluation of saved generator checkpoints
-│   ├── preprocess_rootfiles.py      # Convert ROOT files to Parquet format
-│   ├── merge_batches.py             # Merge batched Parquet files into one
-│   └── utils.py                     # Metrics, visualization, output handling
+│   ├── main.py                          # CLI training entry point
+│   ├── data_loader.py                   # ROOT/parquet loading, feature extraction, parquet I/O
+│   ├── utils.py                         # Metrics, visualization, output helpers
+│   ├── evaluate_saved_generator.py      # Offline evaluation of saved generator checkpoints
+│   ├── evaluate_saved_data.py           # Evaluate pre-generated synthetic parquet
+│   ├── generate_by_pdg_distribution.py  # Mix per-PDG generators into a combined dataset
+│   ├── preprocess_rootfiles.py          # Convert ROOT files to Parquet format
+│   ├── merge_batches.py                 # Merge batched Parquet files into one
+│   └── models/
+│       ├── wgan_gp_model.py             # WGAN-GP with gradient penalty (active model)
+│       ├── cwgan_gp_model.py            # Conditional WGAN-GP conditioned on PDG code
+│       ├── wgan_model.py                # WGAN with weight clipping (earlier experiment)
+│       └── gan_model.py                 # Vanilla GAN (earliest baseline)
 ├── condor/                          # HTCondor batch submission files
-│   ├── submit_gan.sub
+│   ├── submit_wgan_gp_confix.sub
 │   ├── job_script.sh
+│   ├── eval_script.sh
 │   └── ...
-├── gan_results/                     # Timestamped output directories (auto-created)
+├── gan_results/                     # Training output directories (auto-created)
+├── gan_results_optimal/             # Best saved model variants (generator.pth + metrics)
 ├── requirements.txt                 # Python dependencies
 └── README.md
 ```
@@ -45,24 +50,24 @@ The workflow processes COMET experiment ROOT files (`.rootracker` format) contai
 - **Default filter**: All particles at MonitorID=4 (PDG filter optional via `--pdg` or `--pdg-allowlist`)
 - **Detector centering**: Coordinates centered on the midstream MonitorID=4 plane origin `(x=3259, y=0, z=7655.529) mm`
 - **Features extracted** (cylindrical frame, after centering):
-  - `y`, `z` — transverse Cartesian position
-  - `r` → `log1p_r` — radial distance (log1p-transformed)
   - `sin_phi_s`, `cos_phi_s` — spatial azimuthal angle (trig-encoded)
   - `sin_theta`, `cos_theta` — polar angle (trig-encoded)
   - `phi_p` — momentum azimuthal angle
-  - `p_mag` → `log1p_p_mag` — momentum magnitude (log1p-transformed)
+  - `log1p_p_mag` — log1p-transformed momentum magnitude
+  - `log1p_r` — log1p-transformed beam radius; bounded to `[0, log1p(350.4)]` via rejection sampling at generation time
+  - `log_t` — on-shell total energy `sqrt(p² + m²)` in MeV (log1p-transformed); hard-projected from `p_mag` at generation time to enforce E²=p²+m²
   - `pdg` — PDG particle code (kept only for `cwgan-gp`)
 
 **Preprocessing**: ROOT files are first converted to Parquet via `preprocess_rootfiles.py` and optionally batched with `merge_batches.py`.
 
-**Data location (hardcoded)**: `/home/hep/jcc525/comet_data/midstream_merged*.rootracker`
-**Preprocessed data**: `/home/hep/jcc525/cleaned_data/pdgNone_monitor<ID>.parquet`
+**Data location**: `/vols/comet/data/`
+**Preprocessed data**: `/vols/comet/data/pdgNone_monitor<ID>.parquet`
 
 ## Setup Instructions
 
 1. **Activate virtual environment**:
    ```bash
-   source /home/hep/jcc525/venv/bin/activate
+   source .venv/bin/activate
    ```
 
 2. **Install dependencies**:
@@ -174,23 +179,25 @@ Each run creates a timestamped folder (e.g., `gan_results/run_20260131_143022_en
 - Streams preprocessed Parquet files in batches to avoid large memory footprints
 - Exposes `load_preprocessed_data` and `load_root_files` APIs
 
-### `gan_model.py`
-- **Dataset**: `ParticleDataset` for PyTorch training
-- **Model**: Generator + Discriminator (vanilla GAN with BCE loss)
-- **Training**: Standard min-max adversarial training
-- **Sampling**: Generates synthetic data and rescales to original feature space
+### `models/gan_model.py`
+- Vanilla GAN (earliest baseline); Generator + Discriminator with BCE loss
+- Not in active development
 
-### `wgan_model.py`
-- WGAN variant using weight-clipping to enforce the Lipschitz constraint
-- Uses RMSProp optimizer as recommended by the original WGAN paper
+### `models/wgan_model.py`
+- WGAN with weight-clipping; uses RMSProp as recommended by the original paper
+- Not in active development
 
-### `wgan_gp_model.py`
-- WGAN with gradient penalty (Gulrajani et al. 2017)
-- Supports trig unit-circle constraint penalty for sin/cos features
+### `models/wgan_gp_model.py`
+- WGAN with gradient penalty (Gulrajani et al. 2017); the **active model**
+- Physics-aware generation constraints applied post-network:
+  - Sin/cos pairs projected onto the unit circle
+  - `log_t` hard-projected from generated `p_mag` via E²=p²+m² (per-PDG mass from `PDG_MASS_MEV`)
+  - `log1p_r` bounded via rejection sampling (not hard-clipping) in `generate_by_pdg_distribution`
+- Per-sample on-shell penalty during training reinforces the `log_t`↔`p_mag` coupling
 - Early stopping on validation Wasserstein distance
 - Tracks MMD (median-heuristic RBF kernel) alongside Wasserstein for monitoring
 
-### `cwgan_gp_model.py`
+### `models/cwgan_gp_model.py`
 - Conditional WGAN-GP conditioned on PDG particle code via a learned embedding
 - PDG code is mapped to a dense embedding concatenated into both Generator and Critic
 - Drop-in replacement for `train_wgan_gp`; expects a `pdg` column in the dataframe
@@ -199,14 +206,23 @@ Each run creates a timestamped folder (e.g., `gan_results/run_20260131_143022_en
 ### `evaluate_saved_generator.py`
 - Offline evaluation of a saved `generator.pth` checkpoint from any prior run
 - Auto-loads run configuration from matching Condor `.out` log files
-- Computes: KS/Wasserstein, MMD, C2ST (with per-feature permutation importance), FPD (optional, requires TorchScript embedder), 1-NN LOO accuracy
+- Computes: KS/Wasserstein, MMD, C2ST (with per-feature permutation importance), FPD (optional), 1-NN LOO accuracy
+- Applies the same `log1p_r` cap to both synthetic and real sets so metrics are on a consistent domain
 - Computes a real-vs-real baseline for contextualising synth-vs-real metrics
 - Saves metrics JSON alongside the original run directory
+
+### `evaluate_saved_data.py`
+- Evaluates a pre-generated `synthetic_samples.parquet` without re-running the generator
+- Useful for quick metric checks when the synthetic file already exists
+
+### `generate_by_pdg_distribution.py`
+- Combines multiple per-PDG generators to produce a mixed dataset at a target particle-type ratio
+- Uses rejection sampling to enforce the `log1p_r` upper bound while preserving the true radial distribution shape
 
 ### `preprocess_rootfiles.py`
 - Converts raw `.rootracker` ROOT files to Parquet via `load_root_files`
 - Supports batching (`--batch-num`, `--total-batches`) for HTCondor array jobs
-- Output path: `/home/hep/jcc525/cleaned_data/pdg<PDG>_monitor<ID>_batch<N>.parquet`
+- Output path: `/vols/comet/data/pdg<PDG>_monitor<ID>_batch<N>.parquet`
 
 ### `merge_batches.py`
 - Merges multiple batched Parquet files matching a glob pattern into a single file
@@ -292,10 +308,10 @@ Outputs a `generator_external_test_metrics.json` file alongside the run director
 
 ## HTCondor Batch Processing
 
-1. **Edit** `condor/job_script.sh` to set desired arguments
+1. **Edit** `condor/submit_wgan_gp_confix.sub` (or a per-run copy) to set desired arguments
 2. **Submit job**:
    ```bash
-   condor_submit /home/hep/jcc525/gan_particle_physics/condor/submit_gan.sub
+   condor_submit condor/submit_wgan_gp_confix.sub
    ```
 3. **Monitor**:
    ```bash
