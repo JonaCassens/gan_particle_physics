@@ -37,6 +37,10 @@ notebooks/.ipynb_checkpoints/
 
 # Archive (old experiments, not tracked)
 src/archive/
+condor/archive/
+
+# Notes (local only)
+notes/
 
 # OS
 .DS_Store
