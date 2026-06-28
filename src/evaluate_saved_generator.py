@@ -191,8 +191,20 @@ def _resolve_split(
         return _sequential_train_test_split(df, entries=entries, test_entries=test_entries)
 
     n_total = len(df)
-    n_train = entries if entries is not None else int(0.9 * n_total)
-    n_test = test_entries if test_entries is not None else max(1, n_total - n_train)
+    requested_n_train = entries if entries is not None else int(0.9 * n_total)
+    requested_n_test = test_entries if test_entries is not None else max(1, n_total - requested_n_train)
+
+    if requested_n_train + requested_n_test > n_total:
+        n_test = max(1, int(0.1 * n_total)) if n_total > 0 else 0
+        n_train = max(0, n_total - n_test)
+        print(
+            f"[split-adjusted] Requested train+test={requested_n_train + requested_n_test:,} exceeds "
+            f"available rows={n_total:,}. Using fallback split train={n_train:,}, test={n_test:,} (10% test)."
+        )
+    else:
+        n_train = min(max(0, requested_n_train), n_total)
+        n_test = min(max(0, requested_n_test), n_total - n_train)
+
     return _shuffled_train_test_split(df, n_train=n_train, n_test=n_test, seed=split_seed)
 
 
