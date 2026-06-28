@@ -29,7 +29,7 @@ PDG_MASS_GEV = {
 }
 DEFAULT_PARTICLE_MASS_GEV = PDG_MASS_GEV[13]
 TRIG_CLIP_FEATURES = ("sin_phi_s", "cos_phi_s", "sin_theta", "cos_theta", "phi_p")
-POSITIVE_CLIP_FEATURES = ("log1p_r",)  # <-- fix
+POSITIVE_CLIP_FEATURES = ()
 BOUNDED_CLIP_FEATURES = TRIG_CLIP_FEATURES + POSITIVE_CLIP_FEATURES
 UNIT_CIRCLE_PAIRS = (
     ("sin_phi_s", "cos_phi_s"),
@@ -66,7 +66,6 @@ def _apply_generation_bounds(samples: np.ndarray, clip_feature_indices: dict[str
         "sin_theta": (-1.0, 1.0),
         "cos_theta": (-1.0, 1.0),
         "phi_p": (-np.pi, np.pi),
-        "log1p_r": (0.0, np.log1p(350.5)),
         "p_mag": (0.0, np.inf),
     }
     for feature_name in BOUNDED_CLIP_FEATURES:

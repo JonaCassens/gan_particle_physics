@@ -39,6 +39,11 @@ GAN_RESULTS_ROOT = "/home/hep/jcc525/gan_particle_physics/gan_results"
 LOGS_DIR = "/home/hep/jcc525/gan_particle_physics/condor/logs"
 GENERATOR_FILENAME = "generator.pth"
 
+# Uniform r cap: reject generated samples with log1p_r above this threshold.
+# Matches generate_by_pdg_distribution.py. log1p(350.4279) ≈ 5.862005.
+TRUTH_R_MAX = 350.4279
+TRUTH_LOG1P_R_MAX = np.log1p(TRUTH_R_MAX)
+
 DEFAULT_DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 DEFAULT_SPLIT_SEED = 42
 DEFAULT_SPLIT_MODE = "auto"
@@ -931,6 +936,16 @@ def main() -> None:
     print(f"Generated array shape: {synthetic_data.shape}")
     print(f"Synthetic DataFrame shape: {synthetic_df.shape}")
     print(f"Generation time: {generation_elapsed_seconds:.2f} seconds")
+
+    # Apply uniform r cap: filter both synthetic and truth to log1p_r <= TRUTH_LOG1P_R_MAX.
+    if "log1p_r" in synthetic_df.columns:
+        before_s = len(synthetic_df)
+        synthetic_df = synthetic_df[synthetic_df["log1p_r"] <= TRUTH_LOG1P_R_MAX].reset_index(drop=True)
+        print(f"[r-cap] Synthetic: kept {len(synthetic_df):,}/{before_s:,} rows (r <= {TRUTH_R_MAX})")
+    if "log1p_r" in test_df.columns:
+        before_t = len(test_df)
+        test_df = test_df[test_df["log1p_r"] <= TRUTH_LOG1P_R_MAX].reset_index(drop=True)
+        print(f"[r-cap] Truth:     kept {len(test_df):,}/{before_t:,} rows (r <= {TRUTH_R_MAX})")
 
     # Apply user-supplied --exclude-features on top of any schema-driven drops
     if args.exclude_features:
