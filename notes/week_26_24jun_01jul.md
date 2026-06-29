@@ -62,6 +62,23 @@
 - Eval condor scripts updated: CPU queue for bounded_r evals (no GPU), added device/timing info
 - Metrics now saved as both `.json` and human-readable `.md` report
 
+**`confix_*` training runs — new best results (2026-06-29)**
+
+New naming convention (`confix_<particle>`) for runs combining all fixes: rejection-sampling r-bound + on-shell log_t projection + GPU capability filter. Trained on 10M samples, 70 epochs.
+
+| Particle | Run | C2ST acc | Balanced acc | ROC-AUC | MMD | Notes |
+|----------|-----|----------|--------------|---------|-----|-------|
+| μ⁻ | confix_muon | 0.5055 | 0.5066 | 0.5140 | 0.00958 | New muon best |
+| e⁻ | confix_electron | **0.5037** | **0.5045** | **0.5098** | **0.00509** | **Milestone: all three C2ST metrics <0.51** |
+
+- *confix_electron* is the first run where C2ST accuracy, balanced accuracy, and ROC-AUC all fall below 0.51. Neither model's accuracy is statistically distinguishable from chance: muon z≈1.6 (p≈0.12), electron z≈1.0 (p≈0.31) at n=20 000 test pairs.
+- *Muon* per-feature: `phi_p` (W=0.0147) and `log1p_r` (W=0.0138) are the largest residuals; `log_t` has *negative* C2ST importance (−0.0036), confirming on-shell projection eliminates it as a discriminating axis.
+- *Electron* per-feature: `log_t` (W=0.0159) and `log1p_p_mag` (W=0.0125) are the largest residuals; `cos_phi_s` leads C2ST importance (0.0054). The tiny electron mass (~0.511 MeV) means rounding in `p_mag` propagates visibly into the derived `log_t`.
+
+**HTCondor fixes (2026-06-29)**
+- Added `GPUs_Capability >= 7.0` requirement to training submit file — P100 nodes (capability 6.0) are incompatible with PyTorch 2.8 and were silently failing jobs
+- Changed `queue` to single-statement form to resolve HTCondor deprecation warning
+
 ## 3. Selected Plots & Visualisations
 
 - `eval_results/optimal_mix_bounded_r_6pdg/eval_2d_comparisons.png`
@@ -70,6 +87,8 @@
 - `gan_results_optimal/positron_bounded_r_2/gan_comparison.png`
 - `gan_results_optimal/photon_bounded_r_2/gan_comparison.png`
 - `gan_results_optimal/e_theta_constraint/gan_comparison.png`
+- `gan_results/confix_muon/gan_comparison.png`
+- `gan_results/confix_electron/gan_comparison.png`
 
 ## 4. Challenges & Solutions
 
@@ -83,10 +102,11 @@
 
 ## 6. Plan for Next Week
 
-- Investigate and retrain neutron generator — focus on phi_p and t distributions
-- Re-evaluate combined 6-PDG mix using v2 generators (muon_minus_bounded_r_2, positron_bounded_r_2, e_theta_constraint) to see if overall mix metrics improve
+- Retrain neutron generator with all confix fixes — focus on phi_p and t distributions (currently KS=0.237, W=0.667 for phi_p)
+- Run `confix_*` training for remaining particles: photon, positron, antimuon, proton — use submit_wgan_gp_confix.sub
+- Re-evaluate combined 6-PDG mix using confix generators once available, to see if overall mix MMD/C2ST improves from 0.034/0.535
 - Talk to Yuki about downstream data config and comparison pipeline
-- Consider photon-specific constraint to improve log_t / log1p_p_mag matching
+- Consider photon-specific constraint to improve log_t / log1p_p_mag matching (massless: on-shell coupling is trivial)
 
 ## 7. Random Questions / Comments
 
