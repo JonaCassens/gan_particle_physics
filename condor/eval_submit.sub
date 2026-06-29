@@ -16,4 +16,6 @@ request_gpus = 1
 request_memory = 8GB
 request_disk = 8GB
 
+Requirements = (GPUs_Capability >= 7.0)
+
 queue 1
