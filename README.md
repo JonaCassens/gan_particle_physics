@@ -2,20 +2,26 @@
 
 Workflow for generating synthetic COMET experiment particle physics data using a Wasserstein GAN with Gradient Penalty (WGAN-GP). This pipeline loads ROOT files containing particle trajectories, trains a GAN, and generates statistically similar synthetic samples.
 
-> **🏆 Current Best Result — `confix_muon` (WGAN-GP, muons, 10M training samples, 70 epochs)**
-> 
-> | Metric | Value | Ideal |
-> |--------|:-----:|:-----:|
-> | C2ST Accuracy | 0.5055 | 0.500 |
-> | C2ST Balanced Accuracy | 0.5066 | 0.500 |
-> | C2ST ROC-AUC | 0.5140 | 0.500 |
-> | MMD | 0.00958 | ~0.0 |
-> | Mean Wasserstein (all features) | 0.0057 | 0.0 |
-> | Correlation matrix mean abs diff | 0.0050 | 0.0 |
-> 
-> **Statistical significance**: The C2ST accuracy of 0.5055 is not significantly different from chance (z ≈ 1.6, p ≈ 0.12 two-tailed, n = 20 000 test pairs), meaning the MLP classifier cannot distinguish synthetic from real data beyond random guessing. ROC-AUC of 0.514 is similarly near the random-classifier baseline of 0.5. The generator achieves **statistical indistinguishability** on the C2ST test.
+> **🏆 Current Best Results — `confix_*` runs (WGAN-GP, 10M training samples)**
 >
-> **Per-feature breakdown**: `phi_p` (W = 0.0147) and `log1p_r` (W = 0.0138) carry the largest residual discrepancy and dominate C2ST feature importance. The on-shell energy feature `log_t` (W = 0.000631) and polar angle `sin_theta`/`cos_theta` (W < 0.004) are excellently reproduced. The negative C2ST importance of `log_t` (−0.0036) confirms that the E²=p²+m² hard-projection is working correctly — shuffling it actually hurts the classifier, so it is no longer a discriminating axis.
+> | Metric | `confix_electron` | `confix_muon` | Ideal |
+> |--------|:-----------------:|:-------------:|:-----:|
+> | C2ST Accuracy | **0.5037** | 0.5055 | 0.500 |
+> | C2ST Balanced Accuracy | **0.5045** | 0.5066 | 0.500 |
+> | C2ST ROC-AUC | **0.5098** | 0.5140 | 0.500 |
+> | MMD | **0.00509** | 0.00958 | ~0.0 |
+> | Mean Wasserstein (all features) | 0.0069 | **0.0057** | 0.0 |
+> | Correlation matrix mean abs diff | **0.0044** | 0.0050 | 0.0 |
+>
+> **Milestone**: `confix_electron` is the first run where all three C2ST metrics (accuracy, balanced accuracy, ROC-AUC) fall below 0.51. Both models achieve **statistical indistinguishability** — an MLP classifier trained to separate real from synthetic performs no better than random guessing.
+>
+> **Statistical significance**:
+> - *Electron*: C2ST accuracy 0.5037 on 20 000 test pairs → z ≈ 1.0, p ≈ 0.31. ROC-AUC 0.510 is consistent with chance. The null (real ≡ synthetic) cannot be rejected.
+> - *Muon*: C2ST accuracy 0.5055 → z ≈ 1.6, p ≈ 0.12. Similarly non-significant; classifier finds no reliable discriminating signal.
+>
+> **Per-feature breakdown**:
+> - *Electron*: `log_t` (W = 0.0159) and `log1p_p_mag` (W = 0.0125) are the largest residuals; `cos_phi_s` leads C2ST importance (0.0054). The on-shell energy constraint leaves a small residual here because the electron mass is tiny (~0.511 MeV) and rounding in `p_mag` produces small deviations in the derived `log_t`.
+> - *Muon*: `phi_p` (W = 0.0147) and `log1p_r` (W = 0.0138) dominate. The negative C2ST importance of `log_t` (−0.0036) confirms the E²=p²+m² hard-projection is working — shuffling it actually hurts the classifier, so it is no longer a discriminating axis.
 
 ## Project Structure
 
