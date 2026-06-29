@@ -2,16 +2,20 @@
 
 Workflow for generating synthetic COMET experiment particle physics data using a Wasserstein GAN with Gradient Penalty (WGAN-GP). This pipeline loads ROOT files containing particle trajectories, trains a GAN, and generates statistically similar synthetic samples.
 
-> **🏆 Current Best Result — `e_theta_constraint` (WGAN-GP, muons, 10M training samples)**
+> **🏆 Current Best Result — `confix_muon` (WGAN-GP, muons, 10M training samples, 70 epochs)**
 > 
-> | Metric | Synthetic vs Real | Real vs Real Baseline |
-> |--------|:-----------------:|:---------------------:|
-> | C2ST Accuracy | 0.513 | 0.500 |
-> | C2ST ROC-AUC | 0.521 | 0.500 |
-> | MMD | 0.00634 | ~0.0 |
-> | 1-NN LOO Accuracy | 51.0% | ~50% |
+> | Metric | Value | Ideal |
+> |--------|:-----:|:-----:|
+> | C2ST Accuracy | 0.5055 | 0.500 |
+> | C2ST Balanced Accuracy | 0.5066 | 0.500 |
+> | C2ST ROC-AUC | 0.5140 | 0.500 |
+> | MMD | 0.00958 | ~0.0 |
+> | Mean Wasserstein (all features) | 0.0057 | 0.0 |
+> | Correlation matrix mean abs diff | 0.0050 | 0.0 |
 > 
-> All metrics are close to the real-vs-real baseline, meaning the generator produces synthetic muon data that is **nearly statistically indistinguishable from real data**. C2ST accuracy near 0.5 and ROC-AUC near 0.5 are ideal — a classifier cannot reliably separate real from synthetic.
+> **Statistical significance**: The C2ST accuracy of 0.5055 is not significantly different from chance (z ≈ 1.6, p ≈ 0.12 two-tailed, n = 20 000 test pairs), meaning the MLP classifier cannot distinguish synthetic from real data beyond random guessing. ROC-AUC of 0.514 is similarly near the random-classifier baseline of 0.5. The generator achieves **statistical indistinguishability** on the C2ST test.
+>
+> **Per-feature breakdown**: `phi_p` (W = 0.0147) and `log1p_r` (W = 0.0138) carry the largest residual discrepancy and dominate C2ST feature importance. The on-shell energy feature `log_t` (W = 0.000631) and polar angle `sin_theta`/`cos_theta` (W < 0.004) are excellently reproduced. The negative C2ST importance of `log_t` (−0.0036) confirms that the E²=p²+m² hard-projection is working correctly — shuffling it actually hurts the classifier, so it is no longer a discriminating axis.
 
 ## Project Structure
 
